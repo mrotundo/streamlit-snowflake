@@ -1,6 +1,7 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from agents.base_agent import BaseAgent
 from services.llm_interface import LLMInterface
+import json
 
 
 class DepositAgent(BaseAgent):
@@ -79,74 +80,242 @@ When answering questions:
 
 Always maintain professional banking standards and help customers maximize their deposit value."""
     
-    def process(
-        self, 
-        query: str, 
-        llm_service: LLMInterface, 
+    def create_plan(
+        self,
+        query: str,
+        llm_service: LLMInterface,
         model: str,
-        conversation_history: List[Dict[str, str]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, Any]:
-        """Process deposit-related queries"""
+        """Create an execution plan for deposit-related queries"""
         
-        messages = [{"role": "system", "content": self.get_system_prompt()}]
+        planning_prompt = f"""Create an execution plan to answer this deposit-related query: "{query}"
+
+Available tools:
+1. SynthesizeQuery - Requires: requirements (string), query_type (string, optional)
+2. RunQuery - Requires: query (dict)
+3. ProvideAnalysis - Requires: data (dict), question (string), analysis_type (string, optional)
+
+Create a JSON plan with:
+- goal: What we're trying to achieve
+- steps: Array of steps, each with:
+  - step: Step number
+  - tool: Tool name to use
+  - description: What this step does
+  - inputs: Tool inputs (can reference previous outputs with ${{output_key}})
+  - output_key: Key to store this step's output
+- adaptations: How to handle errors or missing data
+
+Focus on getting deposit account data to provide accurate insights.
+
+Respond with ONLY valid JSON."""
+
+        messages = [
+            {"role": "system", "content": "You are a deposit analysis planning expert. Create detailed execution plans."},
+            {"role": "user", "content": planning_prompt}
+        ]
         
         if conversation_history:
-            messages.extend(conversation_history)
+            context = "Previous conversation context:\n"
+            for msg in conversation_history[-3:]:
+                context += f"{msg['role']}: {msg['content'][:100]}...\n"
+            messages[0]["content"] += f"\n\n{context}"
         
-        messages.append({"role": "user", "content": query})
-        
-        # Check if query might need data or visualization
-        needs_data = any(keyword in query.lower() for keyword in [
-            "balance", "transaction", "history", "trend", "analysis",
-            "statement", "activity", "summary", "report"
-        ])
-        
-        if needs_data:
-            enhanced_query = f"""{query}
-
-Note: As a deposit specialist, I can help with:
-- Account balance analysis across all deposit types
-- Transaction pattern identification
-- Deposit growth trends over time
-- Interest earnings optimization
-- Fee analysis and reduction strategies
-
-Please specify if you need analysis for specific accounts or time periods."""
+        try:
+            response = llm_service.complete(messages, model=model, temperature=0.1)
             
-            messages[-1]["content"] = enhanced_query
+            try:
+                plan = json.loads(response)
+            except json.JSONDecodeError:
+                import re
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                if json_match:
+                    plan = json.loads(json_match.group())
+                else:
+                    plan = self._create_default_plan(query)
+            
+            if "goal" not in plan:
+                plan["goal"] = f"Answer deposit query: {query}"
+            if "steps" not in plan or not plan["steps"]:
+                plan = self._create_default_plan(query)
+            
+            return plan
+            
+        except Exception:
+            return self._create_default_plan(query)
+    
+    def _create_default_plan(self, query: str) -> Dict[str, Any]:
+        """Create a default plan when automatic planning fails"""
         
-        response_text = llm_service.complete(messages, model=model)
+        query_lower = query.lower()
         
-        result = self.format_response(
-            text=response_text,
-            metadata={
-                "agent_type": "deposit_specialist",
-                "capabilities_used": self._identify_used_capabilities(query)
-            }
-        )
-        
-        # Add sample data for common queries
-        if "balance" in query.lower() or "account" in query.lower():
-            result["data"] = {
-                "sample_account_summary": {
-                    "total_deposits": "$5.2M",
-                    "number_of_accounts": 3500,
-                    "average_balance": "$1,485",
-                    "accounts_by_type": {
-                        "checking": "45%",
-                        "savings": "35%",
-                        "CD": "15%",
-                        "money_market": "5%"
+        if any(word in query_lower for word in ["balance", "account", "total"]):
+            # Balance inquiry plan
+            return {
+                "goal": f"Get account balance information for: {query}",
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": "SynthesizeQuery",
+                        "description": "Create query for account balance data",
+                        "inputs": {
+                            "requirements": query,
+                            "query_type": "deposit"
+                        },
+                        "output_key": "balance_query"
+                    },
+                    {
+                        "step": 2,
+                        "tool": "RunQuery",
+                        "description": "Get account balance data",
+                        "inputs": {
+                            "query": "${balance_query.query}"
+                        },
+                        "output_key": "balance_data"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "ProvideAnalysis",
+                        "description": "Analyze and summarize account balances",
+                        "inputs": {
+                            "data": "${balance_data}",
+                            "question": query,
+                            "analysis_type": "balance_summary"
+                        },
+                        "output_key": "analysis"
                     }
+                ],
+                "adaptations": {
+                    "no_data": "Explain how to check account balances",
+                    "error": "Provide general balance inquiry guidance"
                 }
             }
-            result["suggested_visualizations"] = [
-                "Account balance distribution",
-                "Deposit growth trend",
-                "Account type breakdown"
-            ]
         
-        return result
+        elif any(word in query_lower for word in ["transaction", "activity", "history"]):
+            # Transaction analysis plan
+            return {
+                "goal": f"Analyze transaction data for: {query}",
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": "SynthesizeQuery",
+                        "description": "Create query for transaction data",
+                        "inputs": {
+                            "requirements": f"Get transaction history for: {query}",
+                            "query_type": "deposit"
+                        },
+                        "output_key": "transaction_query"
+                    },
+                    {
+                        "step": 2,
+                        "tool": "RunQuery",
+                        "description": "Get transaction data",
+                        "inputs": {
+                            "query": "${transaction_query.query}"
+                        },
+                        "output_key": "transaction_data"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "ProvideAnalysis",
+                        "description": "Analyze transaction patterns",
+                        "inputs": {
+                            "data": "${transaction_data}",
+                            "question": query,
+                            "analysis_type": "transaction_analysis"
+                        },
+                        "output_key": "analysis"
+                    }
+                ],
+                "adaptations": {
+                    "no_data": "Explain transaction tracking best practices",
+                    "error": "Provide general transaction insights"
+                }
+            }
+        
+        elif any(word in query_lower for word in ["growth", "trend", "savings"]):
+            # Deposit growth analysis plan
+            return {
+                "goal": f"Analyze deposit growth trends for: {query}",
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": "SynthesizeQuery",
+                        "description": "Create query for deposit growth data",
+                        "inputs": {
+                            "requirements": f"Get deposit growth and trend data for: {query}",
+                            "query_type": "deposit"
+                        },
+                        "output_key": "growth_query"
+                    },
+                    {
+                        "step": 2,
+                        "tool": "RunQuery",
+                        "description": "Get deposit growth data",
+                        "inputs": {
+                            "query": "${growth_query.query}"
+                        },
+                        "output_key": "growth_data"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "ProvideAnalysis",
+                        "description": "Analyze growth trends and patterns",
+                        "inputs": {
+                            "data": "${growth_data}",
+                            "question": query,
+                            "analysis_type": "trend_analysis"
+                        },
+                        "output_key": "analysis"
+                    }
+                ],
+                "adaptations": {
+                    "no_data": "Provide savings growth strategies",
+                    "error": "Offer general deposit growth insights"
+                }
+            }
+        
+        else:
+            # General deposit query plan
+            return {
+                "goal": f"Answer deposit question: {query}",
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": "SynthesizeQuery",
+                        "description": "Understand deposit data needs",
+                        "inputs": {
+                            "requirements": query,
+                            "query_type": "deposit"
+                        },
+                        "output_key": "data_query"
+                    },
+                    {
+                        "step": 2,
+                        "tool": "RunQuery",
+                        "description": "Get relevant deposit data",
+                        "inputs": {
+                            "query": "${data_query.query}"
+                        },
+                        "output_key": "deposit_info"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "ProvideAnalysis",
+                        "description": "Provide comprehensive answer",
+                        "inputs": {
+                            "data": "${deposit_info}",
+                            "question": query,
+                            "analysis_type": "general"
+                        },
+                        "output_key": "analysis"
+                    }
+                ],
+                "adaptations": {
+                    "no_data": "Provide general deposit guidance",
+                    "error": "Offer alternative information sources"
+                }
+            }
     
     def _identify_used_capabilities(self, query: str) -> List[str]:
         """Identify which capabilities might be used for this query"""

@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from agents.base_agent import BaseAgent
 from services.llm_interface import LLMInterface
 import json
@@ -79,76 +79,285 @@ When answering questions:
 
 Always maintain professional banking standards and provide actionable insights."""
     
-    def process(
-        self, 
-        query: str, 
-        llm_service: LLMInterface, 
+    def create_plan(
+        self,
+        query: str,
+        llm_service: LLMInterface,
         model: str,
-        conversation_history: List[Dict[str, str]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, Any]:
-        """Process loan-related queries"""
+        """Create an execution plan for loan-related queries"""
         
-        # Build messages with loan-specific context
-        messages = [{"role": "system", "content": self.get_system_prompt()}]
+        planning_prompt = f"""Create an execution plan to answer this loan-related query: "{query}"
+
+Available tools:
+1. SynthesizeQuery - Requires: requirements (string), query_type (string, optional)
+2. RunQuery - Requires: query (dict)
+3. ProvideAnalysis - Requires: data (dict), question (string), analysis_type (string, optional)
+
+Create a JSON plan with:
+- goal: What we're trying to achieve
+- steps: Array of steps, each with:
+  - step: Step number
+  - tool: Tool name to use
+  - description: What this step does
+  - inputs: Tool inputs (can reference previous outputs with ${{output_key}})
+  - output_key: Key to store this step's output
+- adaptations: How to handle errors or missing data
+
+IMPORTANT: If the query involves comparing time periods (e.g., "this quarter vs last year"), create separate steps to:
+1. Get data for the current period
+2. Get data for the comparison period
+3. Analyze the comparison between periods
+
+Focus on getting the right loan data to answer the question accurately.
+
+Example step structure:
+{{
+  "step": 1,
+  "tool": "SynthesizeQuery",
+  "description": "Convert requirements to query",
+  "inputs": {{
+    "requirements": "Get loan portfolio data",
+    "query_type": "loan"
+  }},
+  "output_key": "loan_query"
+}}
+
+Respond with ONLY valid JSON."""
+
+        messages = [
+            {"role": "system", "content": "You are a loan analysis planning expert. Create detailed execution plans."},
+            {"role": "user", "content": planning_prompt}
+        ]
         
-        # Add conversation history if provided
         if conversation_history:
-            messages.extend(conversation_history)
+            # Add context about previous conversation
+            context = "Previous conversation context:\n"
+            for msg in conversation_history[-3:]:  # Last 3 messages
+                context += f"{msg['role']}: {msg['content'][:100]}...\n"
+            messages[0]["content"] += f"\n\n{context}"
         
-        # Add the current query
-        messages.append({"role": "user", "content": query})
-        
-        # Check if query might need data or visualization
-        needs_data = any(keyword in query.lower() for keyword in [
-            "portfolio", "analysis", "trend", "performance", "distribution",
-            "breakdown", "summary", "report", "metrics", "statistics"
-        ])
-        
-        if needs_data:
-            # Add a note about data capabilities
-            enhanced_query = f"""{query}
-
-Note: As a loan specialist, I can help with:
-- Loan portfolio analysis and breakdowns
-- Performance metrics and trends
-- Risk assessment summaries
-- Interest rate comparisons
-- Default rate analysis
-
-If you need specific data analysis, please specify the metrics or time period you're interested in."""
+        try:
+            response = llm_service.complete(messages, model=model, temperature=0.1)
             
-            messages[-1]["content"] = enhanced_query
+            # Parse JSON response
+            try:
+                plan = json.loads(response)
+            except json.JSONDecodeError:
+                # Extract JSON from response
+                import re
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                if json_match:
+                    plan = json.loads(json_match.group())
+                else:
+                    plan = self._create_default_plan(query)
+            
+            # Ensure plan has required structure
+            if "goal" not in plan:
+                plan["goal"] = f"Answer loan query: {query}"
+            if "steps" not in plan or not plan["steps"]:
+                plan = self._create_default_plan(query)
+            
+            return plan
+            
+        except Exception as e:
+            return self._create_default_plan(query)
+    
+    def _create_default_plan(self, query: str) -> Dict[str, Any]:
+        """Create a default plan when automatic planning fails"""
         
-        # Get response from LLM
-        response_text = llm_service.complete(messages, model=model)
+        # Determine what type of loan query this is
+        query_lower = query.lower()
         
-        # Format the response
-        result = self.format_response(
-            text=response_text,
-            metadata={
-                "agent_type": "loan_specialist",
-                "capabilities_used": self._identify_used_capabilities(query)
-            }
-        )
-        
-        # Add sample data structure for common queries (in real implementation, this would query actual data)
-        if "portfolio" in query.lower() and "analysis" in query.lower():
-            result["data"] = {
-                "sample_portfolio_metrics": {
-                    "total_loans": 10000,
-                    "total_value": "$2.5B",
-                    "average_loan_size": "$250,000",
-                    "current_default_rate": "2.3%",
-                    "average_interest_rate": "5.75%"
+        # Check if this is a time comparison query
+        if any(phrase in query_lower for phrase in ["compared to", "vs", "versus", "last year", "last quarter", "year over year", "quarter over quarter"]):
+            # Time comparison plan
+            return {
+                "goal": f"Compare loan performance across time periods: {query}",
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": "SynthesizeQuery",
+                        "description": "Create query for current period loan data",
+                        "inputs": {
+                            "requirements": f"Get current quarter (Q4 2024) loan data for: {query}",
+                            "query_type": "loan"
+                        },
+                        "output_key": "current_period_query"
+                    },
+                    {
+                        "step": 2,
+                        "tool": "RunQuery",
+                        "description": "Get current period loan data",
+                        "inputs": {
+                            "query": "${current_period_query.query}"
+                        },
+                        "output_key": "current_period_data"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "SynthesizeQuery",
+                        "description": "Create query for comparison period loan data",
+                        "inputs": {
+                            "requirements": f"Get comparison period (last year/quarter) loan data for: {query}",
+                            "query_type": "loan"
+                        },
+                        "output_key": "comparison_period_query"
+                    },
+                    {
+                        "step": 4,
+                        "tool": "RunQuery",
+                        "description": "Get comparison period loan data",
+                        "inputs": {
+                            "query": "${comparison_period_query.query}"
+                        },
+                        "output_key": "comparison_period_data"
+                    },
+                    {
+                        "step": 5,
+                        "tool": "ProvideAnalysis",
+                        "description": "Compare loan performance between periods",
+                        "inputs": {
+                            "data": "${current_period_data}",
+                            "question": query,
+                            "analysis_type": "time_comparison",
+                            "comparison_data": "${comparison_period_data}"
+                        },
+                        "output_key": "analysis"
+                    }
+                ],
+                "adaptations": {
+                    "no_data": "Explain typical loan performance trends",
+                    "error": "Provide general insights on loan performance comparisons"
                 }
             }
-            result["suggested_visualizations"] = [
-                "Loan distribution by type",
-                "Default rate trend over time",
-                "Interest rate comparison by loan category"
-            ]
         
-        return result
+        elif any(word in query_lower for word in ["portfolio", "analysis", "performance", "trend"]):
+            # Portfolio analysis plan
+            return {
+                "goal": f"Analyze loan portfolio to answer: {query}",
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": "SynthesizeQuery",
+                        "description": "Convert requirements to loan data query",
+                        "inputs": {
+                            "requirements": query,
+                            "query_type": "loan"
+                        },
+                        "output_key": "loan_query"
+                    },
+                    {
+                        "step": 2,
+                        "tool": "RunQuery",
+                        "description": "Execute query to get loan portfolio data",
+                        "inputs": {
+                            "query": "${loan_query.query}"
+                        },
+                        "output_key": "loan_data"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "ProvideAnalysis",
+                        "description": "Analyze loan data to answer the question",
+                        "inputs": {
+                            "data": "${loan_data}",
+                            "question": query,
+                            "analysis_type": "portfolio_analysis"
+                        },
+                        "output_key": "analysis"
+                    }
+                ],
+                "adaptations": {
+                    "no_data": "Explain what loan data would be needed",
+                    "error": "Provide general loan portfolio insights"
+                }
+            }
+        
+        elif any(word in query_lower for word in ["rate", "interest", "apr"]):
+            # Interest rate analysis plan
+            return {
+                "goal": f"Analyze interest rates to answer: {query}",
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": "SynthesizeQuery",
+                        "description": "Create query for interest rate data",
+                        "inputs": {
+                            "requirements": f"Get loan interest rate data for: {query}",
+                            "query_type": "loan"
+                        },
+                        "output_key": "rate_query"
+                    },
+                    {
+                        "step": 2,
+                        "tool": "RunQuery",
+                        "description": "Get interest rate data",
+                        "inputs": {
+                            "query": "${rate_query.query}"
+                        },
+                        "output_key": "rate_data"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "ProvideAnalysis",
+                        "description": "Analyze rates and provide insights",
+                        "inputs": {
+                            "data": "${rate_data}",
+                            "question": query,
+                            "analysis_type": "rate_comparison"
+                        },
+                        "output_key": "analysis"
+                    }
+                ],
+                "adaptations": {
+                    "no_data": "Provide general interest rate guidance",
+                    "error": "Explain typical rate ranges"
+                }
+            }
+        
+        else:
+            # General loan query plan
+            return {
+                "goal": f"Answer loan question: {query}",
+                "steps": [
+                    {
+                        "step": 1,
+                        "tool": "SynthesizeQuery",
+                        "description": "Understand data needs",
+                        "inputs": {
+                            "requirements": query,
+                            "query_type": "loan"
+                        },
+                        "output_key": "data_query"
+                    },
+                    {
+                        "step": 2,
+                        "tool": "RunQuery",
+                        "description": "Get relevant loan data",
+                        "inputs": {
+                            "query": "${data_query.query}"
+                        },
+                        "output_key": "loan_info"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "ProvideAnalysis",
+                        "description": "Provide comprehensive answer",
+                        "inputs": {
+                            "data": "${loan_info}",
+                            "question": query,
+                            "analysis_type": "general"
+                        },
+                        "output_key": "analysis"
+                    }
+                ],
+                "adaptations": {
+                    "no_data": "Provide general loan guidance",
+                    "error": "Offer alternative information sources"
+                }
+            }
     
     def _identify_used_capabilities(self, query: str) -> List[str]:
         """Identify which capabilities might be used for this query"""

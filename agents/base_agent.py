@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from services.llm_interface import LLMInterface
+from .plan_executor import PlanExecutor
+import json
 
 
 class BaseAgent(ABC):
@@ -10,6 +12,7 @@ class BaseAgent(ABC):
         self.name = name
         self.description = description
         self._tools = []
+        self.plan_executor = PlanExecutor()
     
     @abstractmethod
     def can_handle(self, query: str, llm_service: LLMInterface, model: str) -> tuple[bool, float]:
@@ -26,16 +29,16 @@ class BaseAgent(ABC):
         """
         pass
     
-    @abstractmethod
     def process(
         self, 
         query: str, 
         llm_service: LLMInterface, 
         model: str,
-        conversation_history: List[Dict[str, str]] = None
+        conversation_history: List[Dict[str, str]] = None,
+        debug_callback: callable = None
     ) -> Dict[str, Any]:
         """
-        Process the query and return a response.
+        Process the query using plan-based execution.
         
         Args:
             query: The user's input query
@@ -49,8 +52,42 @@ class BaseAgent(ABC):
                 - data: Any data retrieved (optional)
                 - visualizations: Any charts/graphs (optional)
                 - metadata: Additional information (optional)
+                - plan: The execution plan (optional)
+                - execution_results: Plan execution details (optional)
         """
-        pass
+        try:
+            # Set debug callback if provided
+            if debug_callback:
+                self.plan_executor.set_debug_callback(debug_callback)
+            
+            # Initialize tools for this execution
+            self._initialize_tools(llm_service, model)
+            
+            # Create execution plan
+            plan = self.create_plan(query, llm_service, model, conversation_history)
+            if debug_callback:
+                if isinstance(plan, dict):
+                    debug_callback(f"Plan created with {len(plan.get('steps', []))} steps")
+                else:
+                    debug_callback(f"Invalid plan format: {type(plan).__name__}", "ERROR")
+                    raise ValueError(f"Plan must be a dictionary, got {type(plan).__name__}")
+            
+            # Execute the plan
+            execution_results = self.plan_executor.execute_plan(plan)
+            
+            # Format the response based on execution results
+            return self._format_execution_response(query, plan, execution_results, llm_service, model)
+        except Exception as e:
+            # Return error response with debugging info
+            import traceback
+            return {
+                "response": f"I encountered an error while processing your request: {str(e)}",
+                "agent": self.name,
+                "error": str(e),
+                "error_traceback": traceback.format_exc(),
+                "plan": getattr(locals(), 'plan', None),
+                "execution_results": getattr(locals(), 'execution_results', None)
+            }
     
     @abstractmethod
     def get_system_prompt(self) -> str:
@@ -62,13 +99,119 @@ class BaseAgent(ABC):
         """List of capabilities this agent provides"""
         return []
     
+    @abstractmethod
+    def create_plan(
+        self,
+        query: str,
+        llm_service: LLMInterface,
+        model: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Create an execution plan for the query.
+        
+        Args:
+            query: The user's query
+            llm_service: LLM service for planning
+            model: Model to use
+            conversation_history: Previous conversation context
+            
+        Returns:
+            Execution plan with steps
+        """
+        pass
+    
     def register_tool(self, tool):
         """Register a tool for this agent to use"""
         self._tools.append(tool)
+        self.plan_executor.register_tool(tool)
     
     def get_tools(self):
         """Get all registered tools"""
         return self._tools
+    
+    def _initialize_tools(self, llm_service: LLMInterface, model: str):
+        """Initialize tools for this execution"""
+        # Always reinitialize to ensure correct LLM service and model
+        # Clear existing tools
+        self._tools = []
+        self.plan_executor.tools_registry = {}
+        
+        # Import and register banking tools
+        from .tools.banking.synthesize_query_tool import SynthesizeQueryTool
+        from .tools.banking.run_query_tool import RunQueryTool
+        from .tools.banking.provide_analysis_tool import ProvideAnalysisTool
+        
+        # Create tool instances
+        synthesize_tool = SynthesizeQueryTool(llm_service, model)
+        run_query_tool = RunQueryTool(llm_service, model)
+        analysis_tool = ProvideAnalysisTool(llm_service, model)
+        
+        # Register tools
+        self.register_tool(synthesize_tool)
+        self.register_tool(run_query_tool)
+        self.register_tool(analysis_tool)
+    
+    def _format_execution_response(
+        self,
+        query: str,
+        plan: Dict[str, Any],
+        execution_results: Dict[str, Any],
+        llm_service: LLMInterface,
+        model: str
+    ) -> Dict[str, Any]:
+        """Format the execution results into a response"""
+        
+        # Extract key information from execution
+        final_output = execution_results.get("final_output", {})
+        success = execution_results.get("success", False)
+        errors = execution_results.get("errors", [])
+        
+        if success and final_output:
+            # Get the analysis from the final step
+            if isinstance(final_output, dict) and "analysis" in final_output:
+                analysis = final_output["analysis"]
+                response_text = analysis.get("answer", "Analysis completed.")
+                
+                # Add insights and recommendations
+                if analysis.get("insights"):
+                    response_text += "\n\n**Key Insights:**\n"
+                    for insight in analysis["insights"]:
+                        response_text += f"• {insight}\n"
+                
+                if analysis.get("recommendations"):
+                    response_text += "\n**Recommendations:**\n"
+                    for rec in analysis["recommendations"]:
+                        response_text += f"• {rec}\n"
+            else:
+                response_text = "I've completed the analysis of your request."
+        else:
+            response_text = f"I encountered an issue while processing your request: {', '.join(errors)}"
+        
+        # Build response
+        response = {
+            "response": response_text,
+            "agent": self.name,
+            "plan": plan,
+            "execution_results": execution_results
+        }
+        
+        # Add data if available
+        if final_output and isinstance(final_output, dict):
+            if "data_analyzed" in final_output:
+                response["data"] = final_output["data_analyzed"]
+            elif "result" in final_output:
+                response["data"] = final_output["result"]
+        
+        # Add metadata
+        response["metadata"] = {
+            "agent_type": self.name.lower().replace("agent", "_specialist"),
+            "plan_executed": success,
+            "steps_completed": len(execution_results.get("steps_executed", [])),
+            "confidence": final_output.get("confidence", 0.0) if isinstance(final_output, dict) else 0.0
+        }
+        
+        return response
     
     def format_response(
         self, 
