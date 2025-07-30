@@ -11,6 +11,7 @@ class ChatMessage(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     model_used: Optional[str] = None
     provider: Optional[str] = None
+    metadata: Optional[str] = None  # JSON string for agent responses
 
 
 class ChatSession(BaseModel):
@@ -18,10 +19,10 @@ class ChatSession(BaseModel):
     
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    workspace_id: str
     messages: List[ChatMessage] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
+    auto_renamed: bool = False
     
     def add_message(
         self,
