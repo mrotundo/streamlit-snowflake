@@ -9,6 +9,7 @@ from models import ChatSession
 from agents.agent_registry import agent_registry
 import json
 from datetime import datetime
+import html
 
 
 def get_llm_service(provider: str) -> Optional[LLMInterface]:
@@ -150,10 +151,20 @@ def main():
     def add_debug_log(message: str, level: str = "INFO"):
         """Add a message to the debug log"""
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        st.session_state.debug_logs.append(f"[{timestamp}] [{level}] {message}")
-        # Keep only last 100 logs
-        if len(st.session_state.debug_logs) > 100:
-            st.session_state.debug_logs = st.session_state.debug_logs[-100:]
+        log_entry = f"[{timestamp}] [{level}] {message}"
+        st.session_state.debug_logs.append(log_entry)
+        
+        # Also print to console with color coding
+        if level == "ERROR":
+            print(f"\033[91m{log_entry}\033[0m")  # Red
+        elif level == "WARNING":
+            print(f"\033[93m{log_entry}\033[0m")  # Yellow
+        else:
+            print(log_entry)  # Normal
+        
+        # Keep only last 500 logs (increased for export functionality)
+        if len(st.session_state.debug_logs) > 500:
+            st.session_state.debug_logs = st.session_state.debug_logs[-500:]
     
     # Initialize agent registry (this will auto-discover agents)
     router = agent_registry.get_router()
@@ -443,6 +454,75 @@ def main():
             
             # Rerun to update the chat display
             st.rerun()
+    
+    # Bottom Debug Panel
+    st.markdown("---")
+    with st.expander("🐛 Debug Console", expanded=False):
+        # Add CSS for scrollable container
+        st.markdown("""
+        <style>
+        .debug-container {
+            height: 400px;
+            overflow-y: scroll;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        .debug-error {
+            color: #f48771;
+        }
+        .debug-warning {
+            color: #dcdcaa;
+        }
+        .debug-info {
+            color: #d4d4d4;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Control buttons
+        col1, col2, col3 = st.columns([1, 1, 8])
+        with col1:
+            if st.button("🗑️ Clear Logs", key="clear_debug_logs_bottom"):
+                st.session_state.debug_logs = []
+                st.rerun()
+        
+        with col2:
+            # Export functionality
+            if st.session_state.debug_logs:
+                log_content = "\n".join(reversed(st.session_state.debug_logs))
+                st.download_button(
+                    label="📥 Export",
+                    data=log_content,
+                    file_name=f"debug_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain",
+                    key="export_debug_logs"
+                )
+        
+        # Display logs in scrollable container
+        if st.session_state.debug_logs:
+            # Build HTML content for logs
+            html_logs = []
+            for log in reversed(st.session_state.debug_logs):
+                escaped_log = html.escape(log)
+                if "[ERROR]" in log:
+                    html_logs.append(f'<div class="debug-error">{escaped_log}</div>')
+                elif "[WARNING]" in log:
+                    html_logs.append(f'<div class="debug-warning">{escaped_log}</div>')
+                else:
+                    html_logs.append(f'<div class="debug-info">{escaped_log}</div>')
+            
+            # Display in container
+            st.markdown(
+                f'<div class="debug-container">{"".join(html_logs)}</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.info("No debug logs yet. Interact with the chat to see logs here.")
 
 
 if __name__ == "__main__":
