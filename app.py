@@ -242,26 +242,6 @@ def main():
                         st.caption(f"...and {len(info['capabilities']) - 3} more")
                 st.markdown("---")
         
-        # Debug Panel
-        with st.expander("🐛 Debug Logs", expanded=False):
-            if st.button("Clear Logs", key="clear_debug_logs"):
-                st.session_state.debug_logs = []
-                st.rerun()
-            
-            # Display logs in reverse order (newest first)
-            if st.session_state.debug_logs:
-                log_container = st.container()
-                with log_container:
-                    for log in reversed(st.session_state.debug_logs):
-                        if "[ERROR]" in log:
-                            st.code(log, language="")
-                        elif "[WARNING]" in log:
-                            st.warning(log)
-                        else:
-                            st.text(log)
-            else:
-                st.info("No debug logs yet")
-        
         # Advanced Settings at the bottom
         with st.expander("⚙️ Advanced Settings"):
             # Provider selection
