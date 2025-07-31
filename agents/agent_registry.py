@@ -31,11 +31,13 @@ class AgentRegistry:
         from .banking.loan_agent import LoanAgent
         from .banking.deposit_agent import DepositAgent
         from .banking.customer_agent import CustomerAgent
+        from .banking.uncertain_agent import UncertainAgent
         
         # Register discovered agents
         self.register_agent_class("LoanAgent", LoanAgent)
         self.register_agent_class("DepositAgent", DepositAgent)
         self.register_agent_class("CustomerAgent", CustomerAgent)
+        self.register_agent_class("UncertainAgent", UncertainAgent)
     
     def register_agent_class(self, name: str, agent_class: Type[BaseAgent]):
         """Register an agent class"""
@@ -54,8 +56,8 @@ class AgentRegistry:
             # Create instances of all registered agents
             for name, agent_class in self._agents.items():
                 agent_instance = agent_class()
-                # CustomerAgent is the default for general queries
-                is_default = (name == "CustomerAgent")
+                # UncertainAgent is the default for unclear queries
+                is_default = (name == "UncertainAgent")
                 self._router.register_agent(agent_instance, is_default=is_default)
         
         return self._router

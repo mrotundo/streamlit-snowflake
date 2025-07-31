@@ -46,10 +46,16 @@ class AgentRouter:
                 best_agent = llm_agent
                 best_confidence = llm_confidence
         
-        # If still no good match, use default agent
-        if best_agent is None or best_confidence < 0.3:
-            best_agent = self._default_agent
-            best_confidence = 0.5
+        # If confidence is below 50%, use the UncertainAgent
+        if best_confidence < 0.5:
+            # Try to find the UncertainAgent
+            for agent in self._agents:
+                if agent.name == "UncertainAgent":
+                    return agent, 1.0  # UncertainAgent always has 100% confidence as fallback
+            
+            # If no UncertainAgent found, use default
+            if self._default_agent:
+                return self._default_agent, 0.5
         
         return best_agent, best_confidence
     
