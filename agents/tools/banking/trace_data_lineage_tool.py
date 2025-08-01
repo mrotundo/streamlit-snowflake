@@ -178,23 +178,40 @@ class TraceDataLineageTool(BaseTool):
         return ""
     
     def _get_table_source_jobs(self, table_name: str) -> List[Dict[str, Any]]:
-        """Get jobs that load data into a table"""
+        """Get jobs that load data into a table (only most recent run per job)
+        
+        This returns only the latest run for each unique job that loads data
+        into the specified table, avoiding duplicate job entries in the lineage.
+        """
         query = """
+            WITH ranked_runs AS (
+                SELECT 
+                    jr.job_run_id,
+                    jr.job_id,
+                    j.job_name,
+                    jr.start_time,
+                    jr.end_time,
+                    jr.status,
+                    jrt.rows_inserted,
+                    jr.error_message,
+                    ROW_NUMBER() OVER (PARTITION BY j.job_name ORDER BY jr.start_time DESC) as rn
+                FROM job_run_target_tables jrt
+                JOIN job_runs jr ON jrt.job_run_id = jr.job_run_id
+                JOIN jobs j ON jr.job_id = j.job_id
+                WHERE LOWER(jrt.table_name) = LOWER(:table_name)
+            )
             SELECT 
-                jr.job_run_id,
-                jr.job_id,
-                j.job_name,
-                jr.start_time,
-                jr.end_time,
-                jr.status,
-                jrt.rows_inserted,
-                jr.error_message
-            FROM job_run_target_tables jrt
-            JOIN job_runs jr ON jrt.job_run_id = jr.job_run_id
-            JOIN jobs j ON jr.job_id = j.job_id
-            WHERE LOWER(jrt.table_name) = LOWER(:table_name)
-            ORDER BY jr.start_time DESC
-            LIMIT 10
+                job_run_id,
+                job_id,
+                job_name,
+                start_time,
+                end_time,
+                status,
+                rows_inserted,
+                error_message
+            FROM ranked_runs
+            WHERE rn = 1
+            ORDER BY start_time DESC
         """
         
         df = self.data_service.execute_query(query, {'table_name': table_name})

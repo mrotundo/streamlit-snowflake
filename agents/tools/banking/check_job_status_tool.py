@@ -64,8 +64,8 @@ class CheckJobStatusTool(BaseTool):
                         END as duration_minutes
                     FROM job_runs jr
                     JOIN jobs j ON jr.job_id = j.job_id
-                    WHERE j.job_name = ?
-                    AND jr.start_time >= ?
+                    WHERE j.job_name = :job_name
+                    AND jr.start_time >= :start_time
                     ORDER BY jr.start_time DESC
                 """
                 params = {'job_name': job_name, 'start_time': start_time}
@@ -88,7 +88,7 @@ class CheckJobStatusTool(BaseTool):
                         END as duration_minutes
                     FROM job_runs jr
                     JOIN jobs j ON jr.job_id = j.job_id
-                    WHERE jr.start_time >= ?
+                    WHERE jr.start_time >= :start_time
                     ORDER BY jr.start_time DESC
                     LIMIT 100
                 """
@@ -96,7 +96,6 @@ class CheckJobStatusTool(BaseTool):
             
             # Adjust for Snowflake
             if hasattr(self.data_service, 'connection_params'):
-                query = query.replace('?', '%s')
                 query = query.replace('JULIANDAY(jr.end_time) - JULIANDAY(jr.start_time)',
                                     'DATEDIFF(minute, jr.start_time, jr.end_time)')
             
@@ -320,11 +319,8 @@ class CheckJobStatusTool(BaseTool):
         job_query = """
             SELECT job_id, job_description, job_type, schedule
             FROM jobs
-            WHERE job_name = ?
+            WHERE job_name = :job_name
         """
-        
-        if hasattr(self.data_service, 'connection_params'):
-            job_query = job_query.replace('?', '%s')
         
         job_df = self.data_service.execute_query(job_query, {'job_name': job_name})
         
@@ -339,11 +335,8 @@ class CheckJobStatusTool(BaseTool):
             FROM job_run_target_tables jrt
             JOIN job_runs jr ON jrt.job_run_id = jr.job_run_id
             JOIN jobs j ON jr.job_id = j.job_id
-            WHERE j.job_name = ?
+            WHERE j.job_name = :job_name
         """
-        
-        if hasattr(self.data_service, 'connection_params'):
-            tables_query = tables_query.replace('?', '%s')
         
         tables_df = self.data_service.execute_query(tables_query, {'job_name': job_name})
         
@@ -361,12 +354,9 @@ class CheckJobStatusTool(BaseTool):
             JOIN job_run_source_files jrsf ON sf.file_id = jrsf.file_id
             JOIN job_runs jr ON jrsf.job_run_id = jr.job_run_id
             JOIN jobs j ON jr.job_id = j.job_id
-            WHERE j.job_name = ?
+            WHERE j.job_name = :job_name
             LIMIT 5
         """
-        
-        if hasattr(self.data_service, 'connection_params'):
-            files_query = files_query.replace('?', '%s')
         
         files_df = self.data_service.execute_query(files_query, {'job_name': job_name})
         
