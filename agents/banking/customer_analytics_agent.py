@@ -103,8 +103,10 @@ You have access to customer, transaction, loan, and deposit data. Use this to pr
 Available tools:
 1. CustomerQuery - Requires: query_type (string), filters (dict, optional), time_period (dict, optional), group_by (list, optional), limit (number, optional)
 2. AnalyzeCustomerSegments - Requires: segment_data (dict), analysis_focus (string, optional), context (dict, optional)
+   IMPORTANT: When using AnalyzeCustomerSegments as the final step, set output_key to "analysis"
 3. TransactionQuery - Requires: query_type (string), filters (dict, optional), time_period (dict, optional), group_by (list, optional)
 4. AnalyzeTransactionPatterns - Requires: transaction_data (dict), analysis_type (string, optional), customer_context (dict, optional)
+   IMPORTANT: When using AnalyzeTransactionPatterns as the final step, set output_key to "analysis"
 
 Create a JSON plan with:
 - goal: What we're trying to achieve
@@ -207,7 +209,7 @@ Respond with ONLY valid JSON."""
                             "segment_data": "${segment_data}",
                             "analysis_focus": "general"
                         },
-                        "output_key": "segment_analysis"
+                        "output_key": "analysis"
                     },
                     {
                         "step": 3,
@@ -249,7 +251,7 @@ Respond with ONLY valid JSON."""
                             "segment_data": "${churn_data}",
                             "analysis_focus": "retention_strategies"
                         },
-                        "output_key": "retention_analysis"
+                        "output_key": "analysis"
                     },
                     {
                         "step": 3,
@@ -292,7 +294,7 @@ Respond with ONLY valid JSON."""
                             "segment_data": "${clv_data}",
                             "analysis_focus": "growth_opportunities"
                         },
-                        "output_key": "clv_analysis"
+                        "output_key": "analysis"
                     },
                     {
                         "step": 3,

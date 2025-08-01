@@ -191,7 +191,8 @@ class BaseAgent(ABC):
                     for rec in analysis["recommendations"]:
                         response_text += f"• {rec}\n"
             else:
-                response_text = "I've completed the analysis of your request."
+                # No analysis tool was used, try to format the raw data
+                response_text = self._format_raw_data_response(query, final_output, plan)
         else:
             response_text = f"I encountered an issue while processing your request: {', '.join(errors)}"
         
@@ -219,6 +220,64 @@ class BaseAgent(ABC):
         }
         
         return response
+    
+    def _format_raw_data_response(self, query: str, data: Dict[str, Any], plan: Dict[str, Any]) -> str:
+        """Format raw data when no analysis tool was used"""
+        response_text = "I've retrieved the following information:\n\n"
+        
+        # Check for common data patterns
+        if "total_balance" in data:
+            response_text += f"**Total Balance:** ${data['total_balance']:,.2f}\n"
+        
+        if "total_count" in data:
+            response_text += f"**Total Records:** {data['total_count']:,}\n"
+        
+        if "summary" in data and isinstance(data["summary"], dict):
+            response_text += "**Summary:**\n"
+            for key, value in data["summary"].items():
+                key_formatted = key.replace("_", " ").title()
+                if isinstance(value, (int, float)):
+                    if "amount" in key or "balance" in key or "value" in key:
+                        response_text += f"• {key_formatted}: ${value:,.2f}\n"
+                    else:
+                        response_text += f"• {key_formatted}: {value:,}\n"
+                else:
+                    response_text += f"• {key_formatted}: {value}\n"
+        
+        if "segments" in data and isinstance(data["segments"], list):
+            response_text += "\n**Segments:**\n"
+            for segment in data["segments"][:5]:  # Show top 5
+                if "segment" in segment:
+                    response_text += f"\n{segment['segment'].title()}:\n"
+                    for key, value in segment.items():
+                        if key != "segment":
+                            key_formatted = key.replace("_", " ").title()
+                            if isinstance(value, (int, float)):
+                                if "amount" in key or "balance" in key or "value" in key or "income" in key:
+                                    response_text += f"  • {key_formatted}: ${value:,.2f}\n"
+                                else:
+                                    response_text += f"  • {key_formatted}: {value:,.0f}\n"
+        
+        # If we have raw records
+        if any(key in data for key in ["loans", "deposits", "customers", "transactions"]):
+            for record_type in ["loans", "deposits", "customers", "transactions"]:
+                if record_type in data and isinstance(data[record_type], list) and data[record_type]:
+                    response_text += f"\n**Sample {record_type.title()}:**\n"
+                    # Show first few records
+                    for i, record in enumerate(data[record_type][:3]):
+                        response_text += f"\n{i+1}. "
+                        # Show key fields
+                        if "id" in record:
+                            response_text += f"ID: {record['id']}"
+                        if "amount" in record:
+                            response_text += f", Amount: ${record['amount']:,.2f}"
+                        if "balance" in record:
+                            response_text += f", Balance: ${record['balance']:,.2f}"
+                        if "status" in record:
+                            response_text += f", Status: {record['status']}"
+                        response_text += "\n"
+        
+        return response_text
     
     def format_response(
         self, 

@@ -15,6 +15,24 @@ class AnalyzeTransactionPatternsTool(BaseTool):
         self.llm_service = llm_service
         self.model = model
     
+    def _limit_data_for_llm(self, data: Any, max_items: int = 10) -> Any:
+        """Limit data size to prevent token limit issues"""
+        if isinstance(data, list):
+            if len(data) > max_items:
+                return data[:max_items] + [{"note": f"... and {len(data) - max_items} more items (truncated for analysis)"}]
+            return data
+        elif isinstance(data, dict):
+            limited_dict = {}
+            for key, value in data.items():
+                if isinstance(value, list) and len(value) > max_items:
+                    limited_dict[key] = value[:max_items] + [{"note": f"... and {len(value) - max_items} more items (truncated for analysis)"}]
+                elif isinstance(value, dict):
+                    limited_dict[key] = self._limit_data_for_llm(value, max_items)
+                else:
+                    limited_dict[key] = value
+            return limited_dict
+        return data
+    
     def get_parameters(self) -> Dict[str, Dict[str, str]]:
         return {
             "transaction_data": {
@@ -50,28 +68,39 @@ class AnalyzeTransactionPatternsTool(BaseTool):
             else:
                 analysis = self._comprehensive_transaction_analysis(transaction_data, customer_context)
             
+            # Format the analysis to match expected structure
+            formatted_analysis = self._format_analysis_response(analysis, analysis_type)
+            
             return {
                 "success": True,
-                "result": analysis
+                "analysis": formatted_analysis
             }
             
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "result": {}
+                "analysis": {
+                    "answer": f"Failed to analyze transaction patterns: {str(e)}",
+                    "insights": [],
+                    "recommendations": []
+                }
             }
     
     def _analyze_behavioral_patterns(self, data: Dict, context: Dict) -> Dict[str, Any]:
         """Analyze customer behavioral patterns from transactions"""
+        # Limit data to prevent token issues
+        limited_data = self._limit_data_for_llm(data, max_items=20)
+        limited_context = self._limit_data_for_llm(context, max_items=10) if context else {}
+        
         # Use LLM for sophisticated pattern analysis
         prompt = f"""Analyze these transaction patterns for behavioral insights:
 
-Transaction Data:
-{json.dumps(data, indent=2)}
+Transaction Data (limited to key items for analysis):
+{json.dumps(limited_data, indent=2)}
 
 Customer Context:
-{json.dumps(context, indent=2) if context else 'General customer base'}
+{json.dumps(limited_context, indent=2) if limited_context else 'General customer base'}
 
 Provide behavioral analysis including:
 1. Spending habits and preferences
@@ -420,3 +449,135 @@ Respond with JSON containing:
                 "roi": "Reduce attrition by 15%"
             }
         ]
+    
+    def _format_analysis_response(self, analysis: Dict[str, Any], analysis_type: str) -> Dict[str, Any]:
+        """Format analysis response to match expected structure"""
+        insights = []
+        recommendations = []
+        answer = ""
+        
+        if analysis_type == "behavioral_insights":
+            # Extract from behavioral analysis structure
+            if "behavioral_segments" in analysis:
+                segments = analysis["behavioral_segments"]
+                if isinstance(segments, dict):
+                    for segment, desc in list(segments.items())[:3]:
+                        insights.append(f"{segment}: {desc}")
+                else:
+                    insights.append("Customer behavioral segments identified")
+            
+            if "spending_patterns" in analysis:
+                patterns = analysis["spending_patterns"]
+                if isinstance(patterns, list):
+                    insights.extend(patterns[:2])
+            
+            if "financial_health" in analysis:
+                health = analysis["financial_health"]
+                if isinstance(health, dict):
+                    insights.append(f"Financial health: {health.get('cash_flow', 'N/A')} cash flow, {health.get('spending_stability', 'N/A')} spending")
+            
+            if "life_events" in analysis:
+                events = analysis["life_events"]
+                if isinstance(events, list) and events:
+                    insights.append(f"Life events detected: {', '.join(events[:2])}")
+            
+            if "recommendations" in analysis:
+                recommendations.extend(analysis["recommendations"][:4])
+            
+            answer = "Behavioral pattern analysis completed. Customer segments and engagement opportunities identified based on transaction behavior."
+            
+        elif analysis_type == "fraud_detection":
+            # Extract from fraud analysis structure
+            if "risk_assessment" in analysis:
+                risk = analysis["risk_assessment"]
+                insights.append(f"Overall fraud risk: {risk.get('overall_risk', 'Unknown')}")
+                if "risk_factors" in risk:
+                    insights.extend(risk["risk_factors"][:2])
+            
+            if "anomalies_detected" in analysis:
+                anomalies = analysis["anomalies_detected"]
+                insights.append(f"{len(anomalies)} anomalies detected")
+                if anomalies:
+                    insights.append(f"Highest risk: {anomalies[0].get('type', 'Unknown')} (score: {anomalies[0].get('risk_score', 0)})")
+            
+            if "pattern_analysis" in analysis:
+                patterns = analysis["pattern_analysis"]
+                if isinstance(patterns, dict):
+                    insights.append(list(patterns.values())[0] if patterns else "Pattern analysis completed")
+            
+            if "recommendations" in analysis:
+                recommendations.extend(analysis["recommendations"][:4])
+            
+            if "monitoring_alerts" in analysis:
+                alerts = analysis["monitoring_alerts"]
+                for alert in alerts[:2]:
+                    recommendations.append(f"Set alert: {alert.get('alert_type', '')}: {alert.get('action', '')}")
+            
+            answer = "Fraud pattern analysis completed. Risk factors identified with monitoring recommendations to enhance security."
+            
+        elif analysis_type == "spending_analysis":
+            # Extract from spending analysis structure
+            if "spending_summary" in analysis:
+                summary = analysis["spending_summary"]
+                insights.append(f"Monthly average spend: {summary.get('monthly_average', 'N/A')}")
+                insights.append(f"Spending trend: {summary.get('spending_trend', 'N/A')}")
+                if "top_categories" in summary:
+                    insights.append(f"Top categories: {', '.join(summary['top_categories'][:3])}")
+            
+            if "budgeting_insights" in analysis:
+                budget_insights = analysis["budgeting_insights"]
+                if isinstance(budget_insights, list):
+                    insights.extend(budget_insights[:2])
+            
+            if "savings_opportunities" in analysis:
+                savings = analysis["savings_opportunities"]
+                for opp in savings[:2]:
+                    recommendations.append(f"{opp.get('category', '')}: Save {opp.get('potential_savings', '')} - {opp.get('recommendation', '')}")
+            
+            if "recommendations" in analysis:
+                recommendations.extend(analysis["recommendations"][:2])
+            
+            answer = "Spending pattern analysis completed. Identified spending trends and savings opportunities to optimize financial wellness."
+            
+        else:  # comprehensive analysis
+            # Extract from comprehensive analysis structure
+            if "executive_summary" in analysis:
+                answer = analysis["executive_summary"]
+            else:
+                answer = "Comprehensive transaction analysis completed."
+            
+            if "volume_analysis" in analysis:
+                volume = analysis["volume_analysis"]
+                insights.append(f"Daily average: {volume.get('daily_average', 0):,.0f} transactions")
+                insights.append(f"Peak activity: {volume.get('peak_day', 'N/A')} at {volume.get('peak_hour', 'N/A')}")
+            
+            if "pattern_insights" in analysis:
+                patterns = analysis["pattern_insights"]
+                if isinstance(patterns, list):
+                    insights.extend(patterns[:3])
+            
+            if "customer_behavior" in analysis:
+                behavior = analysis["customer_behavior"]
+                if "engagement_score" in behavior:
+                    insights.append(f"Engagement score: {behavior['engagement_score']}/10")
+                if "digital_adoption" in behavior:
+                    insights.append(f"Digital adoption: {behavior['digital_adoption']}")
+            
+            if "strategic_recommendations" in analysis:
+                for rec in analysis["strategic_recommendations"][:4]:
+                    if isinstance(rec, dict):
+                        recommendations.append(f"{rec.get('recommendation', '')}: {rec.get('roi', '')}")
+                    else:
+                        recommendations.append(str(rec))
+            
+        # Ensure we have meaningful content
+        if not insights:
+            insights = ["Transaction patterns analyzed", "Customer behavior metrics evaluated"]
+        if not recommendations:
+            recommendations = ["Enhance transaction monitoring", "Improve customer engagement tools"]
+        
+        return {
+            "answer": answer,
+            "insights": insights,
+            "recommendations": recommendations
+        }

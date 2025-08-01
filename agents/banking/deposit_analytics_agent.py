@@ -124,6 +124,8 @@ Create a JSON plan with:
   - error: What to do if a step fails
   - no_data: What to do if no data is available
 
+IMPORTANT: When using AnalyzeDepositTrends as the final step, set output_key to "analysis"
+
 Focus on getting deposit account data to provide accurate insights.
 
 Respond with ONLY valid JSON."""
@@ -178,7 +180,8 @@ Respond with ONLY valid JSON."""
         
         query_lower = query.lower()
         
-        if any(word in query_lower for word in ["balance", "account", "total"]):
+        # For simple total queries, still include analysis
+        if any(word in query_lower for word in ["total deposit", "total balance", "how much deposit"]):
             # Balance inquiry plan
             return {
                 "goal": f"Get account balance information for: {query}",
@@ -189,7 +192,7 @@ Respond with ONLY valid JSON."""
                         "description": "Get account balance and summary data",
                         "inputs": {
                             "query_type": "account_summary",
-                            "filters": filters if 'filters' in locals() else {}
+                            "filters": {}
                         },
                         "output_key": "balance_data"
                     },

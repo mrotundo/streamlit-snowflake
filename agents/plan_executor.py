@@ -132,10 +132,16 @@ class PlanExecutor:
             
             if tool_result["success"]:
                 result["success"] = True
-                result["output"] = tool_result["result"]
-                
-                # Store output in context for future steps
-                self.execution_context[output_key] = tool_result["result"]
+                # Check for 'analysis' key first (for analyze tools), then fall back to 'result'
+                if "analysis" in tool_result:
+                    result["output"] = tool_result["analysis"]
+                    self.execution_context[output_key] = tool_result["analysis"]
+                elif "result" in tool_result:
+                    result["output"] = tool_result["result"]
+                    self.execution_context[output_key] = tool_result["result"]
+                else:
+                    result["output"] = tool_result
+                    self.execution_context[output_key] = tool_result
             else:
                 result["error"] = tool_result.get("error", "Tool execution failed")
         

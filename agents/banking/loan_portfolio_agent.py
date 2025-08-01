@@ -127,6 +127,8 @@ IMPORTANT: If the query involves comparing time periods (e.g., "this quarter vs 
 2. Get data for the comparison period
 3. Analyze the comparison between periods
 
+IMPORTANT: When using AnalyzeLoanPortfolio as the final step, set output_key to "analysis"
+
 Focus on getting the right loan data to answer the question accurately.
 
 Example step structure:
@@ -229,7 +231,7 @@ Respond with ONLY valid JSON."""
                             "analysis_type": "performance_review",
                             "comparison_data": "${comparison_period_data}"
                         },
-                        "output_key": "performance_analysis"
+                        "output_key": "analysis"
                     },
                     {
                         "step": 4,
@@ -259,7 +261,7 @@ Respond with ONLY valid JSON."""
                         "description": "Get loan portfolio summary data",
                         "inputs": {
                             "query_type": "portfolio_summary",
-                            "filters": filters if 'filters' in locals() else {}
+                            "filters": {}
                         },
                         "output_key": "portfolio_data"
                     },
@@ -271,7 +273,7 @@ Respond with ONLY valid JSON."""
                             "portfolio_data": "${portfolio_data}",
                             "analysis_type": "comprehensive"
                         },
-                        "output_key": "portfolio_analysis"
+                        "output_key": "analysis"
                     },
                     {
                         "step": 3,
@@ -312,7 +314,7 @@ Respond with ONLY valid JSON."""
                             "portfolio_data": "${rate_data}",
                             "analysis_type": "performance_review"
                         },
-                        "output_key": "rate_analysis"
+                        "output_key": "analysis"
                     },
                     {
                         "step": 3,

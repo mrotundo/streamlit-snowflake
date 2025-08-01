@@ -116,6 +116,8 @@ Create a JSON plan with:
   - error: What to do if a step fails
   - no_data: What to do if no data is available
 
+IMPORTANT: When using AnalyzeTransactionPatterns as the final step, set output_key to "analysis"
+
 Focus on getting transaction data to provide accurate insights.
 
 Respond with ONLY valid JSON."""
