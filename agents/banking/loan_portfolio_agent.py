@@ -1,29 +1,43 @@
 from typing import List, Dict, Any, Optional
 from agents.base_agent import BaseAgent
 from services.llm_interface import LLMInterface
+from services.data_interface import DataInterface
 import json
 
 
-class LoanAgent(BaseAgent):
-    """Agent specialized in loan-related queries and analysis"""
+class LoanPortfolioAgent(BaseAgent):
+    """Agent specialized in loan portfolio analysis with real database data"""
     
-    def __init__(self):
+    def __init__(self, data_service: DataInterface):
         super().__init__(
-            name="LoanAgent",
-            description="Handles loan inquiries, applications, rates, and portfolio analysis"
+            name="LoanPortfolioAgent",
+            description="Performs loan portfolio analysis, risk assessment, and performance metrics using real data"
         )
+        self.data_service = data_service
+    
+    def _initialize_tools(self, llm_service: LLMInterface, model: str):
+        """Initialize loan portfolio specific tools"""
+        # Clear existing tools first
+        self._tools = []
+        self.plan_executor.tools_registry = {}
+        from agents.tools.banking.loan_query_tool import LoanQueryTool
+        from agents.tools.banking.analyze_loan_portfolio_tool import AnalyzeLoanPortfolioTool
+        
+        # Register tools
+        self.register_tool(LoanQueryTool(self.data_service))
+        self.register_tool(AnalyzeLoanPortfolioTool(llm_service, model))
     
     @property
     def capabilities(self) -> List[str]:
         return [
-            "Loan portfolio analysis",
-            "Interest rate calculations",
-            "Loan eligibility assessment",
-            "Risk assessment summaries",
-            "Loan performance metrics",
-            "Default rate analysis",
-            "Loan application status",
-            "Refinancing options"
+            "Loan portfolio analysis with real-time data",
+            "Risk assessment and concentration analysis",
+            "Default and delinquency trend analysis",
+            "Vintage performance tracking",
+            "Interest rate and yield analysis",
+            "Portfolio quality metrics",
+            "Stress testing and scenario analysis",
+            "Performance benchmarking and comparisons"
         ]
     
     def can_handle(self, query: str, llm_service: LLMInterface, model: str) -> tuple[bool, float]:
@@ -62,22 +76,24 @@ Respond with ONLY a number between 0 and 1 indicating confidence that this is lo
             return False, 0.0
     
     def get_system_prompt(self) -> str:
-        return """You are a specialized banking loan analyst AI assistant. Your expertise includes:
-- Loan portfolio analysis and performance metrics
-- Interest rate calculations and comparisons
-- Risk assessment and credit analysis
-- Loan eligibility and underwriting criteria
-- Regulatory compliance for lending
-- Various loan types (mortgages, personal loans, business loans, etc.)
+        return """You are a specialized loan portfolio analyst AI assistant with access to real banking data. Your expertise includes:
+- Real-time loan portfolio analysis using actual loan data
+- Risk assessment based on current portfolio composition
+- Default and delinquency analysis from historical data
+- Vintage performance tracking and cohort analysis
+- Interest rate distribution and yield optimization
+- Stress testing and scenario analysis
+- Regulatory compliance metrics and reporting
 
 When answering questions:
-1. Provide accurate financial calculations when needed
-2. Explain loan terms and concepts clearly
-3. Consider risk factors and regulatory requirements
-4. Use appropriate financial terminology
-5. If data is needed, indicate what specific data would be helpful
+1. Always use real data from database queries
+2. Provide specific metrics, rates, and dollar amounts
+3. Base risk assessments on actual portfolio performance
+4. Compare current metrics to historical trends
+5. Highlight actionable insights from the data
+6. Consider regulatory requirements (Basel III, CECL, etc.)
 
-Always maintain professional banking standards and provide actionable insights."""
+You have access to loan, customer, and transaction data. Use this to provide accurate, data-driven portfolio insights."""
     
     def create_plan(
         self,
@@ -91,9 +107,8 @@ Always maintain professional banking standards and provide actionable insights."
         planning_prompt = f"""Create an execution plan to answer this loan-related query: "{query}"
 
 Available tools:
-1. SynthesizeQuery - Requires: requirements (string), query_type (string, optional)
-2. RunQuery - Requires: query (dict)
-3. ProvideAnalysis - Requires: data (dict), question (string), analysis_type (string, optional)
+1. LoanQuery - Requires: query_type (string), filters (dict, optional), time_period (dict, optional), comparison_period (dict, optional), group_by (list, optional)
+2. AnalyzeLoanPortfolio - Requires: portfolio_data (dict), analysis_type (string, optional), comparison_data (dict, optional), risk_parameters (dict, optional)
 
 Create a JSON plan with:
 - goal: What we're trying to achieve
@@ -103,7 +118,9 @@ Create a JSON plan with:
   - description: What this step does
   - inputs: Tool inputs (can reference previous outputs with ${{output_key}})
   - output_key: Key to store this step's output
-- adaptations: How to handle errors or missing data
+- adaptations: Dictionary with keys:
+  - error: What to do if a step fails
+  - no_data: What to do if no data is available
 
 IMPORTANT: If the query involves comparing time periods (e.g., "this quarter vs last year"), create separate steps to:
 1. Get data for the current period
@@ -159,6 +176,13 @@ Respond with ONLY valid JSON."""
             if "steps" not in plan or not plan["steps"]:
                 plan = self._create_default_plan(query)
             
+            # Ensure adaptations is a dictionary
+            if "adaptations" not in plan or not isinstance(plan["adaptations"], dict):
+                plan["adaptations"] = {
+                    "error": "Provide general loan portfolio insights based on available data",
+                    "no_data": "Explain what loan data would be needed for this analysis"
+                }
+            
             return plan
             
         except Exception as e:
@@ -178,53 +202,44 @@ Respond with ONLY valid JSON."""
                 "steps": [
                     {
                         "step": 1,
-                        "tool": "SynthesizeQuery",
-                        "description": "Create query for current period loan data",
+                        "tool": "LoanQuery",
+                        "description": "Get current period loan portfolio data",
                         "inputs": {
-                            "requirements": f"Get current quarter (Q4 2024) loan data for: {query}",
-                            "query_type": "loan"
-                        },
-                        "output_key": "current_period_query"
-                    },
-                    {
-                        "step": 2,
-                        "tool": "RunQuery",
-                        "description": "Get current period loan data",
-                        "inputs": {
-                            "query": "${current_period_query.query}"
+                            "query_type": "performance_metrics",
+                            "time_period": {"quarter": "Q3", "year": 2025}
                         },
                         "output_key": "current_period_data"
                     },
                     {
-                        "step": 3,
-                        "tool": "SynthesizeQuery",
-                        "description": "Create query for comparison period loan data",
-                        "inputs": {
-                            "requirements": f"Get comparison period (last year/quarter) loan data for: {query}",
-                            "query_type": "loan"
-                        },
-                        "output_key": "comparison_period_query"
-                    },
-                    {
-                        "step": 4,
-                        "tool": "RunQuery",
+                        "step": 2,
+                        "tool": "LoanQuery",
                         "description": "Get comparison period loan data",
                         "inputs": {
-                            "query": "${comparison_period_query.query}"
+                            "query_type": "performance_metrics",
+                            "time_period": {"quarter": "Q3", "year": 2024}
                         },
                         "output_key": "comparison_period_data"
                     },
                     {
-                        "step": 5,
-                        "tool": "ProvideAnalysis",
+                        "step": 3,
+                        "tool": "AnalyzeLoanPortfolio",
                         "description": "Compare loan performance between periods",
                         "inputs": {
-                            "data": "${current_period_data}",
-                            "question": query,
-                            "analysis_type": "time_comparison",
+                            "portfolio_data": "${current_period_data}",
+                            "analysis_type": "performance_review",
                             "comparison_data": "${comparison_period_data}"
                         },
-                        "output_key": "analysis"
+                        "output_key": "performance_analysis"
+                    },
+                    {
+                        "step": 4,
+                        "tool": "LoanQuery",
+                        "description": "Get loan risk distribution",
+                        "inputs": {
+                            "query_type": "risk_analysis",
+                            "group_by": ["loan_type", "risk_tier"]
+                        },
+                        "output_key": "risk_data"
                     }
                 ],
                 "adaptations": {
@@ -240,33 +255,32 @@ Respond with ONLY valid JSON."""
                 "steps": [
                     {
                         "step": 1,
-                        "tool": "SynthesizeQuery",
-                        "description": "Convert requirements to loan data query",
+                        "tool": "LoanQuery",
+                        "description": "Get loan portfolio summary data",
                         "inputs": {
-                            "requirements": query,
-                            "query_type": "loan"
+                            "query_type": "portfolio_summary",
+                            "filters": filters if 'filters' in locals() else {}
                         },
-                        "output_key": "loan_query"
+                        "output_key": "portfolio_data"
                     },
                     {
                         "step": 2,
-                        "tool": "RunQuery",
-                        "description": "Execute query to get loan portfolio data",
+                        "tool": "AnalyzeLoanPortfolio",
+                        "description": "Analyze loan portfolio composition and performance",
                         "inputs": {
-                            "query": "${loan_query.query}"
+                            "portfolio_data": "${portfolio_data}",
+                            "analysis_type": "comprehensive"
                         },
-                        "output_key": "loan_data"
+                        "output_key": "portfolio_analysis"
                     },
                     {
                         "step": 3,
-                        "tool": "ProvideAnalysis",
-                        "description": "Analyze loan data to answer the question",
+                        "tool": "LoanQuery",
+                        "description": "Get vintage performance data",
                         "inputs": {
-                            "data": "${loan_data}",
-                            "question": query,
-                            "analysis_type": "portfolio_analysis"
+                            "query_type": "vintage_analysis"
                         },
-                        "output_key": "analysis"
+                        "output_key": "vintage_data"
                     }
                 ],
                 "adaptations": {
@@ -282,33 +296,33 @@ Respond with ONLY valid JSON."""
                 "steps": [
                     {
                         "step": 1,
-                        "tool": "SynthesizeQuery",
-                        "description": "Create query for interest rate data",
+                        "tool": "LoanQuery",
+                        "description": "Get loan interest rate distribution",
                         "inputs": {
-                            "requirements": f"Get loan interest rate data for: {query}",
-                            "query_type": "loan"
-                        },
-                        "output_key": "rate_query"
-                    },
-                    {
-                        "step": 2,
-                        "tool": "RunQuery",
-                        "description": "Get interest rate data",
-                        "inputs": {
-                            "query": "${rate_query.query}"
+                            "query_type": "portfolio_summary",
+                            "group_by": ["loan_type", "interest_rate_bucket"]
                         },
                         "output_key": "rate_data"
                     },
                     {
-                        "step": 3,
-                        "tool": "ProvideAnalysis",
-                        "description": "Analyze rates and provide insights",
+                        "step": 2,
+                        "tool": "AnalyzeLoanPortfolio",
+                        "description": "Analyze interest rate distribution and yield",
                         "inputs": {
-                            "data": "${rate_data}",
-                            "question": query,
-                            "analysis_type": "rate_comparison"
+                            "portfolio_data": "${rate_data}",
+                            "analysis_type": "performance_review"
                         },
-                        "output_key": "analysis"
+                        "output_key": "rate_analysis"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "LoanQuery",
+                        "description": "Compare rates to market benchmarks",
+                        "inputs": {
+                            "query_type": "performance_metrics",
+                            "filters": {"metric": "interest_rate"}
+                        },
+                        "output_key": "benchmark_data"
                     }
                 ],
                 "adaptations": {
@@ -318,37 +332,36 @@ Respond with ONLY valid JSON."""
             }
         
         else:
-            # General loan query plan
+            # General loan portfolio analysis plan
             return {
-                "goal": f"Answer loan question: {query}",
+                "goal": f"Provide loan portfolio insights for: {query}",
                 "steps": [
                     {
                         "step": 1,
-                        "tool": "SynthesizeQuery",
-                        "description": "Understand data needs",
+                        "tool": "LoanQuery",
+                        "description": "Get comprehensive loan portfolio data",
                         "inputs": {
-                            "requirements": query,
-                            "query_type": "loan"
+                            "query_type": "portfolio_summary"
                         },
-                        "output_key": "data_query"
+                        "output_key": "portfolio_data"
                     },
                     {
                         "step": 2,
-                        "tool": "RunQuery",
-                        "description": "Get relevant loan data",
+                        "tool": "LoanQuery",
+                        "description": "Get loan risk metrics",
                         "inputs": {
-                            "query": "${data_query.query}"
+                            "query_type": "risk_analysis"
                         },
-                        "output_key": "loan_info"
+                        "output_key": "risk_data"
                     },
                     {
                         "step": 3,
-                        "tool": "ProvideAnalysis",
-                        "description": "Provide comprehensive answer",
+                        "tool": "AnalyzeLoanPortfolio",
+                        "description": "Provide comprehensive portfolio analysis",
                         "inputs": {
-                            "data": "${loan_info}",
-                            "question": query,
-                            "analysis_type": "general"
+                            "portfolio_data": "${portfolio_data}",
+                            "analysis_type": "comprehensive",
+                            "risk_parameters": "${risk_data}"
                         },
                         "output_key": "analysis"
                     }

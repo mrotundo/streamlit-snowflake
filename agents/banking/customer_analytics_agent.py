@@ -1,40 +1,58 @@
 from typing import List, Dict, Any, Optional
 from agents.base_agent import BaseAgent
 from services.llm_interface import LLMInterface
+from services.data_interface import DataInterface
 import json
 
 
-class CustomerAgent(BaseAgent):
-    """Agent specialized in customer profiles, segmentation, and behavior analysis"""
+class CustomerAnalyticsAgent(BaseAgent):
+    """Agent specialized in customer analytics using real database data"""
     
-    def __init__(self):
+    def __init__(self, data_service: DataInterface):
         super().__init__(
-            name="CustomerAgent",
-            description="Handles customer analytics, segmentation, satisfaction, and general banking queries"
+            name="CustomerAnalyticsAgent",
+            description="Performs customer analytics, segmentation, CLV, and churn analysis with real data"
         )
+        self.data_service = data_service
+    
+    def _initialize_tools(self, llm_service: LLMInterface, model: str):
+        """Initialize customer analytics specific tools"""
+        # Clear existing tools first
+        self._tools = []
+        self.plan_executor.tools_registry = {}
+        from agents.tools.banking.customer_query_tool import CustomerQueryTool
+        from agents.tools.banking.transaction_query_tool import TransactionQueryTool
+        from agents.tools.banking.analyze_customer_segments_tool import AnalyzeCustomerSegmentsTool
+        from agents.tools.banking.analyze_transaction_patterns_tool import AnalyzeTransactionPatternsTool
+        
+        # Register tools
+        self.register_tool(CustomerQueryTool(self.data_service))
+        self.register_tool(TransactionQueryTool(self.data_service))
+        self.register_tool(AnalyzeCustomerSegmentsTool(llm_service, model))
+        self.register_tool(AnalyzeTransactionPatternsTool(llm_service, model))
     
     @property
     def capabilities(self) -> List[str]:
         return [
-            "Customer segmentation analysis",
+            "Customer segmentation analysis with real data",
             "Customer lifetime value (CLV) calculation",
-            "Churn prediction and prevention",
-            "Customer satisfaction metrics",
-            "Cross-sell/up-sell opportunities",
-            "Customer demographics analysis",
-            "Banking product recommendations",
-            "Customer journey mapping",
-            "General banking inquiries"
+            "Churn risk assessment and prediction",
+            "Product adoption and cross-sell analysis",
+            "Customer demographics and behavior analysis",
+            "Retention strategy development",
+            "Growth opportunity identification",
+            "Real-time customer insights"
         ]
     
     def can_handle(self, query: str, llm_service: LLMInterface, model: str) -> tuple[bool, float]:
-        """Determine if this agent can handle customer-related queries"""
+        """Determine if this agent can handle customer analytics queries"""
         
         customer_keywords = [
-            "customer", "client", "user", "member", "satisfaction",
-            "churn", "retention", "lifetime value", "clv", "segment",
-            "demographic", "behavior", "cross-sell", "upsell",
-            "experience", "journey", "persona", "profile"
+            "customer", "client", "user", "member", "account holder",
+            "churn", "retention", "attrition", "lifetime value", "clv", "ltv",
+            "segment", "segmentation", "demographic", "behavior", "behavioural",
+            "cross-sell", "upsell", "product adoption", "relationship",
+            "satisfaction", "nps", "experience", "engagement"
         ]
         
         query_lower = query.lower()
@@ -43,32 +61,33 @@ class CustomerAgent(BaseAgent):
         keyword_matches = sum(1 for keyword in customer_keywords if keyword in query_lower)
         
         if keyword_matches >= 2:
-            return True, 0.85
+            return True, 0.9
         elif keyword_matches == 1:
-            return True, 0.6
+            return True, 0.7
         
-        # This agent also handles general queries as the default
-        # If no other specific keywords, still handle with lower confidence
-        return True, 0.3
+        # Check for specific patterns
+        if any(phrase in query_lower for phrase in ["who are our", "which customers", "customer analysis"]):
+            return True, 0.8
+        
+        return False, 0.0
     
     def get_system_prompt(self) -> str:
-        return """You are a specialized banking customer analytics AI assistant. Your expertise includes:
-- Customer segmentation and profiling
-- Customer lifetime value analysis
-- Churn prediction and retention strategies
-- Customer satisfaction and NPS analysis
-- Cross-sell and up-sell opportunity identification
-- Demographic and behavioral analysis
-- General banking knowledge and assistance
+        return """You are a specialized customer analytics AI assistant with access to real banking data. Your expertise includes:
+- Customer segmentation using actual customer data
+- CLV calculation based on real transaction history
+- Churn prediction using behavioral indicators
+- Product adoption analysis from actual usage data
+- Demographics analysis from customer database
+- Data-driven retention and growth strategies
 
 When answering questions:
-1. Provide insights based on customer data patterns
-2. Suggest actionable strategies for customer engagement
-3. Identify opportunities for improving customer experience
-4. Use data-driven approaches for recommendations
-5. Consider privacy and regulatory requirements
+1. Always use real data from database queries
+2. Provide specific metrics and numbers
+3. Base recommendations on actual patterns observed
+4. Highlight actionable insights from the data
+5. Consider data privacy and present aggregated insights
 
-For general banking queries, provide helpful and accurate information while maintaining a professional tone."""
+You have access to customer, transaction, loan, and deposit data. Use this to provide accurate, data-driven insights."""
     
     def create_plan(
         self,
@@ -82,9 +101,10 @@ For general banking queries, provide helpful and accurate information while main
         planning_prompt = f"""Create an execution plan to answer this customer-related query: "{query}"
 
 Available tools:
-1. SynthesizeQuery - Requires: requirements (string), query_type (string, optional)
-2. RunQuery - Requires: query (dict)
-3. ProvideAnalysis - Requires: data (dict), question (string), analysis_type (string, optional)
+1. CustomerQuery - Requires: query_type (string), filters (dict, optional), time_period (dict, optional), group_by (list, optional), limit (number, optional)
+2. AnalyzeCustomerSegments - Requires: segment_data (dict), analysis_focus (string, optional), context (dict, optional)
+3. TransactionQuery - Requires: query_type (string), filters (dict, optional), time_period (dict, optional), group_by (list, optional)
+4. AnalyzeTransactionPatterns - Requires: transaction_data (dict), analysis_type (string, optional), customer_context (dict, optional)
 
 Create a JSON plan with:
 - goal: What we're trying to achieve
@@ -94,7 +114,9 @@ Create a JSON plan with:
   - description: What this step does
   - inputs: Tool inputs (can reference previous outputs with ${{output_key}})
   - output_key: Key to store this step's output
-- adaptations: How to handle errors or missing data
+- adaptations: Dictionary with keys:
+  - error: What to do if a step fails
+  - no_data: What to do if no data is available
 
 Focus on getting customer data to provide accurate insights.
 
@@ -144,6 +166,13 @@ Respond with ONLY valid JSON."""
             if "steps" not in plan or not isinstance(plan["steps"], list) or not plan["steps"]:
                 return self._create_default_plan(query)
             
+            # Ensure adaptations is a dictionary
+            if "adaptations" not in plan or not isinstance(plan["adaptations"], dict):
+                plan["adaptations"] = {
+                    "error": "Provide general customer insights based on available data",
+                    "no_data": "Explain what customer data would be needed for this analysis"
+                }
+            
             return plan
             
         except Exception as e:
@@ -162,33 +191,33 @@ Respond with ONLY valid JSON."""
                 "steps": [
                     {
                         "step": 1,
-                        "tool": "SynthesizeQuery",
-                        "description": "Create query for customer segmentation data",
+                        "tool": "CustomerQuery",
+                        "description": "Get customer segmentation data from database",
                         "inputs": {
-                            "requirements": query,
-                            "query_type": "customer"
-                        },
-                        "output_key": "segment_query"
-                    },
-                    {
-                        "step": 2,
-                        "tool": "RunQuery",
-                        "description": "Get customer segmentation data",
-                        "inputs": {
-                            "query": "${segment_query.query}"
+                            "query_type": "segmentation",
+                            "group_by": ["segment"]
                         },
                         "output_key": "segment_data"
                     },
                     {
-                        "step": 3,
-                        "tool": "ProvideAnalysis",
+                        "step": 2,
+                        "tool": "AnalyzeCustomerSegments",
                         "description": "Analyze customer segments and patterns",
                         "inputs": {
-                            "data": "${segment_data}",
-                            "question": query,
-                            "analysis_type": "segmentation_analysis"
+                            "segment_data": "${segment_data}",
+                            "analysis_focus": "general"
                         },
-                        "output_key": "analysis"
+                        "output_key": "segment_analysis"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "TransactionQuery",
+                        "description": "Get transaction patterns by segment",
+                        "inputs": {
+                            "query_type": "pattern_detection",
+                            "time_period": {"start": "date('now', '-30 days')"}
+                        },
+                        "output_key": "transaction_patterns"
                     }
                 ],
                 "adaptations": {
@@ -204,33 +233,34 @@ Respond with ONLY valid JSON."""
                 "steps": [
                     {
                         "step": 1,
-                        "tool": "SynthesizeQuery",
-                        "description": "Create query for churn risk data",
+                        "tool": "CustomerQuery",
+                        "description": "Get at-risk customer data from database",
                         "inputs": {
-                            "requirements": f"Get customer churn and retention data for: {query}",
-                            "query_type": "customer"
-                        },
-                        "output_key": "churn_query"
-                    },
-                    {
-                        "step": 2,
-                        "tool": "RunQuery",
-                        "description": "Get churn risk data",
-                        "inputs": {
-                            "query": "${churn_query.query}"
+                            "query_type": "churn_risk",
+                            "limit": 100
                         },
                         "output_key": "churn_data"
                     },
                     {
-                        "step": 3,
-                        "tool": "ProvideAnalysis",
-                        "description": "Analyze churn patterns and provide retention strategies",
+                        "step": 2,
+                        "tool": "AnalyzeCustomerSegments",
+                        "description": "Analyze churn patterns and develop retention strategies",
                         "inputs": {
-                            "data": "${churn_data}",
-                            "question": query,
-                            "analysis_type": "churn_analysis"
+                            "segment_data": "${churn_data}",
+                            "analysis_focus": "retention_strategies"
                         },
-                        "output_key": "analysis"
+                        "output_key": "retention_analysis"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "TransactionQuery",
+                        "description": "Analyze transaction behavior of at-risk customers",
+                        "inputs": {
+                            "query_type": "behavioral_insights",
+                            "filters": {"segment": "at_risk"},
+                            "time_period": {"start": "date('now', '-90 days')"}
+                        },
+                        "output_key": "behavior_analysis"
                     }
                 ],
                 "adaptations": {
@@ -246,33 +276,33 @@ Respond with ONLY valid JSON."""
                 "steps": [
                     {
                         "step": 1,
-                        "tool": "SynthesizeQuery",
-                        "description": "Create query for CLV calculation data",
+                        "tool": "CustomerQuery",
+                        "description": "Get customer lifetime value data",
                         "inputs": {
-                            "requirements": f"Get customer value and revenue data for: {query}",
-                            "query_type": "customer"
-                        },
-                        "output_key": "clv_query"
-                    },
-                    {
-                        "step": 2,
-                        "tool": "RunQuery",
-                        "description": "Get customer value data",
-                        "inputs": {
-                            "query": "${clv_query.query}"
+                            "query_type": "lifetime_value",
+                            "limit": 50
                         },
                         "output_key": "clv_data"
                     },
                     {
-                        "step": 3,
-                        "tool": "ProvideAnalysis",
-                        "description": "Calculate CLV and provide value insights",
+                        "step": 2,
+                        "tool": "AnalyzeCustomerSegments",
+                        "description": "Analyze CLV patterns and opportunities",
                         "inputs": {
-                            "data": "${clv_data}",
-                            "question": query,
-                            "analysis_type": "clv_analysis"
+                            "segment_data": "${clv_data}",
+                            "analysis_focus": "growth_opportunities"
                         },
-                        "output_key": "analysis"
+                        "output_key": "clv_analysis"
+                    },
+                    {
+                        "step": 3,
+                        "tool": "CustomerQuery",
+                        "description": "Get product adoption data for high-value customers",
+                        "inputs": {
+                            "query_type": "product_adoption",
+                            "filters": {"segment": "high_value"}
+                        },
+                        "output_key": "product_data"
                     }
                 ],
                 "adaptations": {
@@ -282,37 +312,39 @@ Respond with ONLY valid JSON."""
             }
         
         else:
-            # General customer query plan
+            # General customer analytics plan
             return {
-                "goal": f"Answer customer question: {query}",
+                "goal": f"Provide customer analytics insights for: {query}",
                 "steps": [
                     {
                         "step": 1,
-                        "tool": "SynthesizeQuery",
-                        "description": "Understand customer data needs",
+                        "tool": "CustomerQuery",
+                        "description": "Get relevant customer data",
                         "inputs": {
-                            "requirements": query,
-                            "query_type": "customer"
+                            "query_type": "demographics",
+                            "group_by": ["segment"],
+                            "limit": 100
                         },
-                        "output_key": "data_query"
+                        "output_key": "customer_data"
                     },
                     {
                         "step": 2,
-                        "tool": "RunQuery",
-                        "description": "Get relevant customer data",
+                        "tool": "TransactionQuery",
+                        "description": "Get customer transaction patterns",
                         "inputs": {
-                            "query": "${data_query.query}"
+                            "query_type": "pattern_detection",
+                            "time_period": {"start": "date('now', '-30 days')"}
                         },
-                        "output_key": "customer_info"
+                        "output_key": "transaction_data"
                     },
                     {
                         "step": 3,
-                        "tool": "ProvideAnalysis",
-                        "description": "Provide comprehensive answer",
+                        "tool": "AnalyzeTransactionPatterns",
+                        "description": "Analyze customer behavior patterns",
                         "inputs": {
-                            "data": "${customer_info}",
-                            "question": query,
-                            "analysis_type": "general"
+                            "transaction_data": "${transaction_data}",
+                            "analysis_type": "behavioral_insights",
+                            "customer_context": "${customer_data}"
                         },
                         "output_key": "analysis"
                     }

@@ -27,18 +27,20 @@ class AgentRegistry:
     
     def _discover_agents(self):
         """Auto-discover and load all agent implementations"""
-        # Import banking agents
-        from .banking.loan_agent import LoanAgent
-        from .banking.deposit_agent import DepositAgent
-        from .banking.customer_agent import CustomerAgent
+        # Import updated banking agents with real data integration
+        from .banking.loan_portfolio_agent import LoanPortfolioAgent
+        from .banking.deposit_analytics_agent import DepositAnalyticsAgent
+        from .banking.customer_analytics_agent import CustomerAnalyticsAgent
+        from .banking.transaction_insights_agent import TransactionInsightsAgent
         from .banking.uncertain_agent import UncertainAgent
         from .banking.data_status_agent import DataStatusAgent
         from .banking.data_details_agent import DataDetailsAgent
         
         # Register discovered agents
-        self.register_agent_class("LoanAgent", LoanAgent)
-        self.register_agent_class("DepositAgent", DepositAgent)
-        self.register_agent_class("CustomerAgent", CustomerAgent)
+        self.register_agent_class("LoanPortfolioAgent", LoanPortfolioAgent)
+        self.register_agent_class("DepositAnalyticsAgent", DepositAnalyticsAgent)
+        self.register_agent_class("CustomerAnalyticsAgent", CustomerAnalyticsAgent)
+        self.register_agent_class("TransactionInsightsAgent", TransactionInsightsAgent)
         self.register_agent_class("DataStatusAgent", DataStatusAgent)
         self.register_agent_class("DataDetailsAgent", DataDetailsAgent)
         self.register_agent_class("UncertainAgent", UncertainAgent)
@@ -51,7 +53,14 @@ class AgentRegistry:
         """Create an instance of a registered agent"""
         agent_class = self._agents.get(name)
         if agent_class:
-            return agent_class()
+            # For data-driven agents, initialize with data service
+            if name in ["LoanPortfolioAgent", "DepositAnalyticsAgent", 
+                       "CustomerAnalyticsAgent", "TransactionInsightsAgent"]:
+                from services.data_factory import DataServiceFactory
+                data_service = DataServiceFactory.create_data_service()
+                return agent_class(data_service)
+            else:
+                return agent_class()
         return None
     
     def get_router(self) -> AgentRouter:
@@ -59,7 +68,15 @@ class AgentRegistry:
         if not self._router._agents:  # If router doesn't have agents yet
             # Create instances of all registered agents
             for name, agent_class in self._agents.items():
-                agent_instance = agent_class()
+                # For data-driven agents, initialize with data service
+                if name in ["LoanPortfolioAgent", "DepositAnalyticsAgent", 
+                           "CustomerAnalyticsAgent", "TransactionInsightsAgent"]:
+                    from services.data_factory import DataServiceFactory
+                    data_service = DataServiceFactory.create_data_service()
+                    agent_instance = agent_class(data_service)
+                else:
+                    agent_instance = agent_class()
+                
                 # UncertainAgent is the default for unclear queries
                 is_default = (name == "UncertainAgent")
                 self._router.register_agent(agent_instance, is_default=is_default)
@@ -74,7 +91,15 @@ class AgentRegistry:
         """Get information about all registered agents"""
         info = {}
         for name, agent_class in self._agents.items():
-            agent_instance = agent_class()
+            # For data-driven agents, initialize with data service
+            if name in ["LoanPortfolioAgent", "DepositAnalyticsAgent", 
+                       "CustomerAnalyticsAgent", "TransactionInsightsAgent"]:
+                from services.data_factory import DataServiceFactory
+                data_service = DataServiceFactory.create_data_service()
+                agent_instance = agent_class(data_service)
+            else:
+                agent_instance = agent_class()
+            
             info[name] = {
                 "name": agent_instance.name,
                 "description": agent_instance.description,
