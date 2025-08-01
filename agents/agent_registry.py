@@ -33,12 +33,14 @@ class AgentRegistry:
         from .banking.customer_agent import CustomerAgent
         from .banking.uncertain_agent import UncertainAgent
         from .banking.data_status_agent import DataStatusAgent
+        from .banking.data_details_agent import DataDetailsAgent
         
         # Register discovered agents
         self.register_agent_class("LoanAgent", LoanAgent)
         self.register_agent_class("DepositAgent", DepositAgent)
         self.register_agent_class("CustomerAgent", CustomerAgent)
         self.register_agent_class("DataStatusAgent", DataStatusAgent)
+        self.register_agent_class("DataDetailsAgent", DataDetailsAgent)
         self.register_agent_class("UncertainAgent", UncertainAgent)
     
     def register_agent_class(self, name: str, agent_class: Type[BaseAgent]):
