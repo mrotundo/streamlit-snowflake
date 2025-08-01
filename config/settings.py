@@ -25,6 +25,10 @@ class Settings:
     # Default provider
     DEFAULT_PROVIDER: str = os.getenv('DEFAULT_PROVIDER', 'openai')
     
+    # Data provider settings
+    DATA_PROVIDER: str = os.getenv('DATA_PROVIDER', 'local')  # 'local' or 'snowflake'
+    LOCAL_DB_PATH: str = os.getenv('LOCAL_DB_PATH', 'data/banking.db')
+    
     @classmethod
     def is_snowflake_configured(cls) -> bool:
         """Check if Snowflake credentials are configured"""

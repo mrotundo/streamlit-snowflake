@@ -4,6 +4,8 @@ from config.settings import Settings
 from services.snowflake_service import SnowflakeService
 from services.openai_service import OpenAIService
 from services.llm_interface import LLMInterface
+from services.data_factory import DataServiceFactory
+from services.data_interface import DataInterface
 from utils.session_manager import SessionManager
 from models import ChatSession
 from agents.agent_registry import agent_registry
@@ -175,6 +177,30 @@ def main():
         st.error("No LLM providers configured. Please set up either Snowflake or OpenAI credentials in your .env file.")
         st.stop()
     
+    # Initialize data service
+    data_service = None
+    try:
+        data_provider = Settings.DATA_PROVIDER
+        data_service = DataServiceFactory.create_data_service(data_provider)
+        if data_service.connect():
+            add_debug_log(f"Connected to {data_provider} data service")
+            
+            # Initialize sample data if using local service and tables don't exist
+            if data_provider == 'local':
+                tables = data_service.get_available_tables()
+                if not tables or 'loans' not in tables:
+                    add_debug_log("Initializing sample data...")
+                    from services.local_data_service import LocalDataService
+                    if isinstance(data_service, LocalDataService):
+                        data_service.initialize_sample_data()
+                        add_debug_log("Sample data initialized")
+        else:
+            add_debug_log(f"Failed to connect to {data_provider} data service", "WARNING")
+            data_service = None
+    except Exception as e:
+        add_debug_log(f"Error initializing data service: {str(e)}", "ERROR")
+        data_service = None
+    
     # Set default provider and model if not set
     if not session_manager.get_llm_provider():
         default_provider = Settings.DEFAULT_PROVIDER if Settings.DEFAULT_PROVIDER in available_providers else available_providers[0]
@@ -270,6 +296,27 @@ def main():
                 if model != session_manager.get_llm_model():
                     session_manager.set_llm_model(model)
                     add_debug_log(f"Model changed to: {model}")
+            
+            # Data provider selection
+            st.markdown("### Data Settings")
+            available_data_providers = DataServiceFactory.get_available_providers()
+            current_data_provider = Settings.DATA_PROVIDER
+            data_provider_option = st.selectbox(
+                "Data Provider",
+                options=available_data_providers,
+                index=available_data_providers.index(current_data_provider) if current_data_provider in available_data_providers else 0
+            )
+            if data_provider_option != current_data_provider:
+                st.info(f"Data provider will be changed to {data_provider_option} on next restart")
+            
+            # Show data connection status
+            if data_service:
+                conn_info = data_service.get_connection_info()
+                st.success(f"✅ Connected to {conn_info['type']} database")
+                if conn_info.get('tables'):
+                    st.caption(f"Available tables: {', '.join(conn_info['tables'])}")
+            else:
+                st.warning("⚠️ No data connection established")
     
     # Main chat interface
     st.title("🏦 Banking AI Assistant")
@@ -374,7 +421,8 @@ def main():
                             llm_service,
                             session_manager.get_llm_model(),
                             conversation_history,
-                            debug_callback=add_debug_log
+                            debug_callback=add_debug_log,
+                            data_service=data_service
                         )
                         
                         add_debug_log(f"Agent response received: {bool(agent_response)}")
@@ -506,4 +554,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # Ensure data directory exists
+    import os
+    os.makedirs("data", exist_ok=True)
+    
     main()

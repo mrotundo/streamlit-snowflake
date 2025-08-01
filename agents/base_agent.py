@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from services.llm_interface import LLMInterface
+from services.data_interface import DataInterface
 from .plan_executor import PlanExecutor
 import json
 
@@ -13,6 +14,7 @@ class BaseAgent(ABC):
         self.description = description
         self._tools = []
         self.plan_executor = PlanExecutor()
+        self.data_service = None
     
     @abstractmethod
     def can_handle(self, query: str, llm_service: LLMInterface, model: str) -> tuple[bool, float]:
@@ -35,7 +37,8 @@ class BaseAgent(ABC):
         llm_service: LLMInterface, 
         model: str,
         conversation_history: List[Dict[str, str]] = None,
-        debug_callback: callable = None
+        debug_callback: callable = None,
+        data_service: Optional[DataInterface] = None
     ) -> Dict[str, Any]:
         """
         Process the query using plan-based execution.
@@ -59,6 +62,10 @@ class BaseAgent(ABC):
             # Set debug callback if provided
             if debug_callback:
                 self.plan_executor.set_debug_callback(debug_callback)
+            
+            # Set data service if provided
+            if data_service:
+                self.data_service = data_service
             
             # Initialize tools for this execution
             self._initialize_tools(llm_service, model)
@@ -144,7 +151,7 @@ class BaseAgent(ABC):
         
         # Create tool instances
         synthesize_tool = SynthesizeQueryTool(llm_service, model)
-        run_query_tool = RunQueryTool(llm_service, model)
+        run_query_tool = RunQueryTool(llm_service, model, self.data_service)
         analysis_tool = ProvideAnalysisTool(llm_service, model)
         
         # Register tools

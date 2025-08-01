@@ -1,21 +1,23 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from agents.tools.base_tool import BaseTool
 from services.llm_interface import LLMInterface
+from services.data_interface import DataInterface
 import json
 import random
 from datetime import datetime, timedelta
 
 
 class RunQueryTool(BaseTool):
-    """Tool for executing queries and returning mock data"""
+    """Tool for executing queries and returning data"""
     
-    def __init__(self, llm_service: LLMInterface, model: str):
+    def __init__(self, llm_service: LLMInterface, model: str, data_service: Optional[DataInterface] = None):
         super().__init__(
             name="RunQuery",
             description="Execute structured queries and return data"
         )
         self.llm_service = llm_service
         self.model = model
+        self.data_service = data_service
     
     def get_parameters(self) -> Dict[str, Dict[str, str]]:
         return {
@@ -26,10 +28,19 @@ class RunQueryTool(BaseTool):
         }
     
     def execute(self, **kwargs) -> Dict[str, Any]:
-        """Execute a query and return mock data"""
+        """Execute a query and return data"""
         query = kwargs.get("query", {})
         
         try:
+            # If we have a data service, use it to get real data
+            if self.data_service and self.data_service.validate_connection():
+                result = self.data_service.execute_structured_query(query)
+                return {
+                    "success": True,
+                    "result": result
+                }
+            
+            # Otherwise, fall back to generating mock data
             entity = query.get("entity", "data")
             filters = query.get("filters", {})
             metrics = query.get("metrics", ["count"])
