@@ -147,13 +147,10 @@ Available tools:
    - Returns job runs with status, timing, and errors
    - Can check specific job or all recent jobs
 
-4. AnalyzeDataFreshness - Requires: object_name (string)
-   - Use this to check when data was last updated
-   - Compares timestamps across related objects
-   - Identifies data lag issues
-
-5. ProvideAnalysis - Requires: data (dict), question (string), analysis_type (string, optional)
-   - Use this to analyze the findings and provide insights
+4. AnalyzeDataLineage - Requires: lineage_data (dict), view_data (dict, optional), job_status (dict, optional), user_query (string)
+   - Use this to analyze all findings and identify root causes
+   - Provides specialized insights for data quality issues
+   - Generates actionable recommendations
 
 Create a JSON plan that investigates the data issue step by step.
 
@@ -189,16 +186,13 @@ Example response format:
         }},
         {{
             "step": 4,
-            "tool": "ProvideAnalysis",
+            "tool": "AnalyzeDataLineage",
             "description": "Analyze findings and identify root cause",
             "parameters": {{
-                "data": {{
-                    "view_data": "${{step_1.result}}",
-                    "lineage": "${{step_2.result}}",
-                    "job_status": "${{step_3.result}}"
-                }},
-                "question": query,
-                "analysis_type": "root_cause_analysis"
+                "lineage_data": "${{step_2.result}}",
+                "view_data": "${{step_1.result}}",
+                "job_status": "${{step_3.result}}",
+                "user_query": "{query}"
             }}
         }}
     ]
@@ -265,14 +259,13 @@ Important:
                     },
                     {
                         "step": 4,
-                        "tool": "ProvideAnalysis",
+                        "tool": "AnalyzeDataLineage",
                         "description": "Analyze findings and provide insights",
                         "parameters": {
-                            "data": {
-                                "investigation_results": "${step_1.result}, ${step_2.result}, ${step_3.result}"
-                            },
-                            "question": query,
-                            "analysis_type": "data_quality_investigation"
+                            "lineage_data": "${step_2_output}",
+                            "view_data": "${step_1_output}",
+                            "job_status": "${step_3_output}",
+                            "user_query": query
                         }
                     }
                 ]
@@ -288,19 +281,58 @@ Important:
         from agents.tools.banking.check_view_data_tool import CheckViewDataTool
         from agents.tools.banking.trace_data_lineage_tool import TraceDataLineageTool
         from agents.tools.banking.check_job_status_tool import CheckJobStatusTool
-        from agents.tools.banking.analyze_data_freshness_tool import AnalyzeDataFreshnessTool
-        from agents.tools.banking.provide_analysis_tool import ProvideAnalysisTool
+        from agents.tools.banking.analyze_data_lineage_tool import AnalyzeDataLineageTool
         
         # Create tool instances
         check_view_tool = CheckViewDataTool(self.data_service)
         trace_lineage_tool = TraceDataLineageTool(self.data_service)
         check_job_tool = CheckJobStatusTool(self.data_service)
-        analyze_freshness_tool = AnalyzeDataFreshnessTool(self.data_service)
-        analysis_tool = ProvideAnalysisTool(llm_service, model)
+        analyze_lineage_tool = AnalyzeDataLineageTool(llm_service, model)
         
         # Register tools
         self.register_tool(check_view_tool)
         self.register_tool(trace_lineage_tool)
         self.register_tool(check_job_tool)
-        self.register_tool(analyze_freshness_tool)
-        self.register_tool(analysis_tool)
+        self.register_tool(analyze_lineage_tool)
+    
+    def _format_execution_response(
+        self,
+        query: str,
+        plan: Dict[str, Any],
+        execution_results: Dict[str, Any],
+        llm_service: LLMInterface,
+        model: str
+    ) -> Dict[str, Any]:
+        """Format the execution results into a response for data status queries"""
+        
+        # Get the base response
+        response = super()._format_execution_response(query, plan, execution_results, llm_service, model)
+        
+        # Check if we have analysis results from AnalyzeDataLineage
+        steps_executed = execution_results.get("steps_executed", [])
+        analysis_step = next((s for s in steps_executed if s.get("tool") == "AnalyzeDataLineage"), None)
+        
+        if analysis_step and analysis_step.get("success") and analysis_step.get("output"):
+            analysis_output = analysis_step["output"]
+            
+            # Use the summary from the analysis tool
+            if "summary" in analysis_output:
+                response["response"] = analysis_output["summary"]
+            
+            # Add structured data
+            if "insights" in analysis_output:
+                response["data"] = {
+                    "insights": analysis_output["insights"],
+                    "root_cause": analysis_output.get("root_cause"),
+                    "recommendations": analysis_output.get("recommendations", [])
+                }
+            
+            # Add analysis details to metadata
+            response["metadata"]["analysis_details"] = {
+                "freshness_issues": len(analysis_output.get("freshness_issues", [])),
+                "job_issues": len(analysis_output.get("job_issues", [])),
+                "bottlenecks": len(analysis_output.get("bottlenecks", [])),
+                "data_objects_analyzed": analysis_output.get("analysis", {}).get("total_objects", 0)
+            }
+        
+        return response

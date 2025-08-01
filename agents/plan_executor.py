@@ -169,7 +169,7 @@ class PlanExecutor:
         except Exception as e:
             print(f"Error resolving variables: {str(e)}")
             print(f"Inputs: {inputs}")
-            print(f"Execution context: {self.execution_context}")
+            print(f"Execution context keys: {list(self.execution_context.keys())}")
             raise
     
     def _replace_variables(self, text: str) -> Any:
