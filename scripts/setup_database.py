@@ -59,6 +59,11 @@ class DatabaseSetup:
             cursor.execute("DROP VIEW IF EXISTS v_loan_portfolio")
             cursor.execute("DROP VIEW IF EXISTS v_deposit_summary")
             cursor.execute("DROP VIEW IF EXISTS v_customer_products")
+            # Drop catalog tables first (they have foreign keys to views)
+            cursor.execute("DROP TABLE IF EXISTS data_catalog_examples")
+            cursor.execute("DROP TABLE IF EXISTS data_catalog_metrics")
+            cursor.execute("DROP TABLE IF EXISTS data_catalog_columns")
+            cursor.execute("DROP TABLE IF EXISTS data_catalog_views")
             # Drop lineage tables
             cursor.execute("DROP TABLE IF EXISTS data_quality_checks")
             cursor.execute("DROP TABLE IF EXISTS view_dependencies")
@@ -291,6 +296,83 @@ class DatabaseSetup:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_view_deps_view ON view_dependencies(view_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_view_deps_object ON view_dependencies(depends_on_object)")
         
+        # Create data catalog tables
+        print("  - Creating catalog tables...")
+        
+        # Data catalog views table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS data_catalog_views (
+                catalog_view_id TEXT PRIMARY KEY,
+                view_name TEXT NOT NULL UNIQUE,
+                view_type TEXT NOT NULL,
+                business_description TEXT,
+                technical_description TEXT,
+                owner TEXT,
+                data_domain TEXT,
+                refresh_frequency TEXT,
+                last_refreshed TIMESTAMP,
+                row_count INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Data catalog columns table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS data_catalog_columns (
+                catalog_column_id TEXT PRIMARY KEY,
+                view_name TEXT NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT NOT NULL,
+                column_order INTEGER NOT NULL,
+                is_nullable BOOLEAN DEFAULT TRUE,
+                is_primary_key BOOLEAN DEFAULT FALSE,
+                business_description TEXT,
+                technical_description TEXT,
+                data_classification TEXT,
+                example_values TEXT,
+                valid_values TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (view_name) REFERENCES data_catalog_views(view_name),
+                UNIQUE(view_name, column_name)
+            )
+        """)
+        
+        # Data catalog metrics table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS data_catalog_metrics (
+                metric_id TEXT PRIMARY KEY,
+                view_name TEXT NOT NULL,
+                column_name TEXT,
+                metric_name TEXT NOT NULL,
+                metric_value TEXT,
+                metric_date DATE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (view_name) REFERENCES data_catalog_views(view_name)
+            )
+        """)
+        
+        # Data catalog examples table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS data_catalog_examples (
+                example_id TEXT PRIMARY KEY,
+                view_name TEXT NOT NULL,
+                example_type TEXT NOT NULL,
+                example_query TEXT,
+                example_description TEXT,
+                business_context TEXT,
+                created_by TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (view_name) REFERENCES data_catalog_views(view_name)
+            )
+        """)
+        
+        # Create indexes for catalog tables
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_catalog_cols_view ON data_catalog_columns(view_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_catalog_metrics_view ON data_catalog_metrics(view_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_catalog_examples_view ON data_catalog_examples(view_name)")
+        
         self.data_service.connection.commit()
         print("  - All tables created successfully!")
     
@@ -314,6 +396,11 @@ class DatabaseSetup:
             cursor.execute("DROP VIEW IF EXISTS V_LOAN_PORTFOLIO")
             cursor.execute("DROP VIEW IF EXISTS V_DEPOSIT_SUMMARY")
             cursor.execute("DROP VIEW IF EXISTS V_CUSTOMER_PRODUCTS")
+            # Drop catalog tables first (they have foreign keys to views)
+            cursor.execute("DROP TABLE IF EXISTS DATA_CATALOG_EXAMPLES")
+            cursor.execute("DROP TABLE IF EXISTS DATA_CATALOG_METRICS")
+            cursor.execute("DROP TABLE IF EXISTS DATA_CATALOG_COLUMNS")
+            cursor.execute("DROP TABLE IF EXISTS DATA_CATALOG_VIEWS")
             # Drop lineage tables
             cursor.execute("DROP TABLE IF EXISTS DATA_QUALITY_CHECKS")
             cursor.execute("DROP TABLE IF EXISTS VIEW_DEPENDENCIES")
@@ -522,6 +609,78 @@ class DatabaseSetup:
                 status VARCHAR(20) NOT NULL,
                 check_timestamp TIMESTAMP NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+            )
+        """)
+        
+        # Create data catalog tables
+        print("  - Creating catalog tables...")
+        
+        # Data catalog views table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS DATA_CATALOG_VIEWS (
+                catalog_view_id VARCHAR(50) PRIMARY KEY,
+                view_name VARCHAR(100) NOT NULL UNIQUE,
+                view_type VARCHAR(50) NOT NULL,
+                business_description TEXT,
+                technical_description TEXT,
+                owner VARCHAR(100),
+                data_domain VARCHAR(50),
+                refresh_frequency VARCHAR(50),
+                last_refreshed TIMESTAMP,
+                row_count NUMBER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+            )
+        """)
+        
+        # Data catalog columns table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS DATA_CATALOG_COLUMNS (
+                catalog_column_id VARCHAR(50) PRIMARY KEY,
+                view_name VARCHAR(100) NOT NULL,
+                column_name VARCHAR(100) NOT NULL,
+                column_type VARCHAR(50) NOT NULL,
+                column_order NUMBER NOT NULL,
+                is_nullable BOOLEAN DEFAULT TRUE,
+                is_primary_key BOOLEAN DEFAULT FALSE,
+                business_description TEXT,
+                technical_description TEXT,
+                data_classification VARCHAR(50),
+                example_values TEXT,
+                valid_values TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+                FOREIGN KEY (view_name) REFERENCES DATA_CATALOG_VIEWS(view_name),
+                UNIQUE(view_name, column_name)
+            )
+        """)
+        
+        # Data catalog metrics table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS DATA_CATALOG_METRICS (
+                metric_id VARCHAR(50) PRIMARY KEY,
+                view_name VARCHAR(100) NOT NULL,
+                column_name VARCHAR(100),
+                metric_name VARCHAR(100) NOT NULL,
+                metric_value TEXT,
+                metric_date DATE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+                FOREIGN KEY (view_name) REFERENCES DATA_CATALOG_VIEWS(view_name)
+            )
+        """)
+        
+        # Data catalog examples table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS DATA_CATALOG_EXAMPLES (
+                example_id VARCHAR(50) PRIMARY KEY,
+                view_name VARCHAR(100) NOT NULL,
+                example_type VARCHAR(50) NOT NULL,
+                example_query TEXT,
+                example_description TEXT,
+                business_context TEXT,
+                created_by VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+                FOREIGN KEY (view_name) REFERENCES DATA_CATALOG_VIEWS(view_name)
             )
         """)
         
