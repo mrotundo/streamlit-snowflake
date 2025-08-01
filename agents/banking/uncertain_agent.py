@@ -24,8 +24,9 @@ class UncertainAgent(BaseAgent):
     
     def can_handle(self, query: str, llm_service: LLMInterface, model: str) -> tuple[bool, float]:
         """This agent handles all queries that other agents can't confidently handle"""
-        # Always return True with 100% confidence since this is the fallback
-        return True, 1.0
+        # Return a very low confidence so this agent is only used as a fallback
+        # when no other agent can handle the query with confidence
+        return True, 0.1
     
     def get_system_prompt(self) -> str:
         return """You are a helpful banking assistant designed to clarify unclear requests and guide users to the right specialist.
@@ -49,7 +50,8 @@ Be friendly, professional, and guide users toward getting the help they need."""
         llm_service: LLMInterface, 
         model: str,
         conversation_history: List[Dict[str, str]] = None,
-        debug_callback: callable = None
+        debug_callback: callable = None,
+        data_service: Optional[Any] = None
     ) -> Dict[str, Any]:
         """Process unclear queries by asking for clarification"""
         

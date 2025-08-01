@@ -12,6 +12,19 @@ from agents.agent_registry import agent_registry
 import json
 from datetime import datetime
 import html
+import numpy as np
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles NumPy types"""
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 
 def get_llm_service(provider: str) -> Optional[LLMInterface]:
@@ -445,7 +458,7 @@ def main():
                     
                     # Store agent response metadata (for visualization)
                     if current_session.messages:
-                        current_session.messages[-1].metadata = json.dumps({"agent_response": agent_response})
+                        current_session.messages[-1].metadata = json.dumps({"agent_response": agent_response}, cls=NumpyEncoder)
                     
                     # Auto-rename session after first message if needed
                     if session_manager.should_auto_rename_session(current_session.id):

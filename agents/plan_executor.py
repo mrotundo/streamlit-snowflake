@@ -101,7 +101,7 @@ class PlanExecutor:
         step_num = step.get("step", "?")
         tool_name = step.get("tool", "")
         description = step.get("description", "")
-        inputs = step.get("inputs", {})
+        inputs = step.get("inputs", step.get("parameters", {}))
         output_key = step.get("output_key", f"step_{step_num}_output")
         
         result = {
