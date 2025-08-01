@@ -134,12 +134,8 @@ class TraceDataLineageTool(BaseTool):
                 vd.depends_on_schema as schema_name
             FROM view_dependencies vd
             JOIN data_views dv ON vd.view_id = dv.view_id
-            WHERE dv.view_name = ?
+            WHERE dv.view_name = :view_name
         """
-        
-        # Adjust for Snowflake
-        if hasattr(self.data_service, 'connection_params'):
-            query = query.replace('?', '%s')
         
         df = self.data_service.execute_query(query, {'view_name': view_name})
         
@@ -158,11 +154,8 @@ class TraceDataLineageTool(BaseTool):
         query = """
             SELECT view_level
             FROM data_views
-            WHERE view_name = ?
+            WHERE view_name = :view_name
         """
-        
-        if hasattr(self.data_service, 'connection_params'):
-            query = query.replace('?', '%s')
         
         df = self.data_service.execute_query(query, {'view_name': view_name})
         
@@ -175,11 +168,8 @@ class TraceDataLineageTool(BaseTool):
         query = """
             SELECT description
             FROM data_views
-            WHERE view_name = ?
+            WHERE view_name = :view_name
         """
-        
-        if hasattr(self.data_service, 'connection_params'):
-            query = query.replace('?', '%s')
         
         df = self.data_service.execute_query(query, {'view_name': view_name})
         
@@ -202,13 +192,10 @@ class TraceDataLineageTool(BaseTool):
             FROM job_run_target_tables jrt
             JOIN job_runs jr ON jrt.job_run_id = jr.job_run_id
             JOIN jobs j ON jr.job_id = j.job_id
-            WHERE LOWER(jrt.table_name) = LOWER(?)
+            WHERE LOWER(jrt.table_name) = LOWER(:table_name)
             ORDER BY jr.start_time DESC
             LIMIT 10
         """
-        
-        if hasattr(self.data_service, 'connection_params'):
-            query = query.replace('?', '%s')
         
         df = self.data_service.execute_query(query, {'table_name': table_name})
         
@@ -238,11 +225,8 @@ class TraceDataLineageTool(BaseTool):
                 sf.arrival_time
             FROM job_run_source_files jrsf
             JOIN source_files sf ON jrsf.file_id = sf.file_id
-            WHERE jrsf.job_run_id = ?
+            WHERE jrsf.job_run_id = :job_run_id
         """
-        
-        if hasattr(self.data_service, 'connection_params'):
-            query = query.replace('?', '%s')
         
         df = self.data_service.execute_query(query, {'job_run_id': job_run_id})
         
@@ -264,12 +248,9 @@ class TraceDataLineageTool(BaseTool):
             SELECT MAX(jr.end_time) as last_loaded
             FROM job_run_target_tables jrt
             JOIN job_runs jr ON jrt.job_run_id = jr.job_run_id
-            WHERE LOWER(jrt.table_name) = LOWER(?)
+            WHERE LOWER(jrt.table_name) = LOWER(:table_name)
             AND jr.status = 'SUCCESS'
         """
-        
-        if hasattr(self.data_service, 'connection_params'):
-            query = query.replace('?', '%s')
         
         df = self.data_service.execute_query(query, {'table_name': table_name})
         
